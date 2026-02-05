@@ -1,0 +1,21 @@
+{
+  "name": "python-analytics-skills",
+  "owner": {
+    "name": "Chris Fonnesbeck"
+  },
+  "metadata": {
+    "description": "Python analytics skills for Bayesian modeling and reactive notebooks",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "analytics",
+      "description": "Python analytics plugin — Bayesian modeling with PyMC, reactive notebooks with marimo",
+      "source": "./",
+      "skills": [
+        "./skills/pymc-modeling",
+        "./skills/marimo-notebook"
+      ]
+    }
+  ]
+}

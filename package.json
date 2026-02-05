@@ -1,0 +1,10 @@
+{
+  "name": "@pymc-labs/python-analytics-skills",
+  "version": "1.0.0",
+  "description": "Python analytics skills for AI coding assistants",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pymc-labs/python-analytics-skills.git"
+  },
+  "keywords": ["skills", "claude", "pymc", "bayesian", "marimo"]
+}

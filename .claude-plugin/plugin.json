@@ -1,0 +1,11 @@
+{
+  "name": "analytics",
+  "description": "Python analytics skills for Bayesian modeling and reactive notebooks",
+  "version": "1.0.0",
+  "author": {
+    "name": "Chris Fonnesbeck"
+  },
+  "repository": "https://github.com/pymc-labs/python-analytics-skills",
+  "license": "MIT",
+  "keywords": ["python", "analytics", "bayesian", "pymc", "marimo", "data-science"]
+}

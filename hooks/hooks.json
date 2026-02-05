@@ -1,0 +1,17 @@
+{
+  "description": "Suggest analytics skills based on user prompt keywords",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/suggest-skill.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

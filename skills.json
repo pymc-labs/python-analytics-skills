@@ -1,0 +1,14 @@
+{
+  "skills": [
+    {
+      "name": "pymc-modeling",
+      "description": "Bayesian statistical modeling with PyMC v5+",
+      "version": "1.0.0"
+    },
+    {
+      "name": "marimo-notebook",
+      "description": "Reactive Python notebooks with marimo",
+      "version": "1.0.0"
+    }
+  ]
+}
