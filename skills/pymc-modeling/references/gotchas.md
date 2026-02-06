@@ -165,6 +165,46 @@ with model:
 az.plot_ppc(prior_pred, group="prior")
 ```
 
+## PyMC API Issues
+
+### Variable Name Same as Dimension Label
+
+PyMC v5+ does not allow a variable to have the same name as its dimension label. This causes a `ValueError` at model creation.
+
+```python
+# ERROR: Variable `cohort` has the same name as its dimension label
+coords = {"cohort": cohorts, "year": years}
+with pm.Model(coords=coords) as model:
+    cohort = rw2_fn("cohort", n_cohorts, sigma_c, dims="cohort")  # ValueError!
+
+# FIX: Use different names for dimension labels
+coords = {"cohort_idx": cohorts, "year_idx": years}
+with pm.Model(coords=coords) as model:
+    cohort = rw2_fn("cohort", n_cohorts, sigma_c, dims="cohort_idx")  # OK
+    period = rw2_fn("period", n_years, sigma_t, dims="year_idx")  # OK
+```
+
+
+### ArviZ plot_ppc Parameter Names
+
+ArviZ's `plot_ppc()` function does not accept `num_pp_samples` parameter. This parameter was removed in recent versions.
+
+```python
+# ERROR: Unexpected keyword argument
+az.plot_ppc(idata, kind="cumulative", num_pp_samples=100)  # TypeError
+
+# FIX: Remove num_pp_samples parameter
+az.plot_ppc(idata, kind="cumulative")  # OK
+az.plot_ppc(idata, kind="kde")  # OK
+```
+
+**Note**: If you need to limit samples, subset the InferenceData object first:
+```python
+# Subset to fewer draws if needed
+idata_subset = idata.sel(draw=slice(0, 100))
+az.plot_ppc(idata_subset, kind="cumulative")
+```
+
 ### Over-Tight Priors with Link Functions
 
 Priors that are too narrow can cause link functions to saturate on new data.

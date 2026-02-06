@@ -265,6 +265,62 @@ print(f"Problematic observations: {bad_idx}")
 
 ---
 
+## LOO-CV and Model Comparison
+
+### Computing Log-Likelihood with nutpie
+
+**Critical**: With nutpie sampler, log-likelihood is NOT stored automatically. You must compute it explicitly after sampling for LOO-CV and LOO-PIT to work.
+
+```python
+# After sampling with nutpie
+with model:
+    idata = pm.sample(nuts_sampler="nutpie", draws=1000, tune=1000)
+
+# ERROR: log_likelihood not found
+loo = az.loo(idata)  # TypeError: log likelihood not found
+
+# FIX: Compute log-likelihood explicitly
+with model:
+    pm.compute_log_likelihood(idata)
+
+# Now LOO-CV works
+loo = az.loo(idata, pointwise=True)
+az.plot_loo_pit(idata, y="y")
+```
+
+**Best practice**: Always compute log-likelihood after sampling with nutpie:
+```python
+with model:
+    idata = pm.sample(nuts_sampler="nutpie", ...)
+    pm.compute_log_likelihood(idata)  # Required for LOO-CV
+```
+
+**Note**: PyMC's native NUTS sampler stores log-likelihood automatically, but nutpie does not.
+
+### plot_khat Requires LOO Object
+
+The `az.plot_khat()` function expects a LOO object (from `az.loo()`), not the InferenceData directly.
+
+```python
+# ERROR: Incorrect khat data input
+az.plot_khat(idata, show_bins=True)  # ValueError: Incorrect khat data input
+
+# FIX: Pass the LOO object
+loo = az.loo(idata, pointwise=True)
+az.plot_khat(loo, show_bins=True)  # OK
+```
+
+**Best practice**: Always compute LOO first, then plot:
+```python
+loo = az.loo(idata, pointwise=True)
+az.plot_khat(loo, show_bins=True)
+
+# Check Pareto k values
+n_bad = (loo.pareto_k > 0.7).sum().item()
+if n_bad > 0:
+    print(f"Warning: {n_bad} observations with high Pareto k")
+```
+
 ## Model Comparison Quick Reference
 
 ### LOO-CV (Preferred)
