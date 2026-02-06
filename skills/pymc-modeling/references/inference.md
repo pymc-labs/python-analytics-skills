@@ -111,6 +111,10 @@ with model:
         nuts_sampler="nutpie",
         random_seed=42,
     )
+
+    # IMPORTANT: nutpie doesn't store log_likelihood automatically
+    # Compute it explicitly if you need LOO-CV or LOO-PIT
+    pm.compute_log_likelihood(idata)
 ```
 
 #### Configuration Options
