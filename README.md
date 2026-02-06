@@ -1,6 +1,6 @@
 # Python Analytics Skills
 
-A Claude Code plugin providing [Agent Skills](https://agentskills.io) for Bayesian modeling and reactive notebooks. Packages specialized knowledge for PyMC and marimo into skills that Claude loads on-demand.
+A plugin for Claude Code and other AI coding platforms providing [Agent Skills](https://agentskills.io) for Bayesian modeling and reactive notebooks. Packages specialized knowledge for PyMC and marimo into skills that Claude loads on-demand.
 
 ## Skills
 

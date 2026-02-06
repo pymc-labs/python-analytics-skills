@@ -1,0 +1,6 @@
+parameter,true_value
+alpha,2.0
+beta1,1.5
+beta2,-0.3
+sigma,0.8
+n_outliers,7.0

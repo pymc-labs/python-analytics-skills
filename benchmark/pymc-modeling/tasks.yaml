@@ -1,0 +1,235 @@
+# PyMC Skill Benchmark Task Definitions
+# Each task tests specific skill coverage areas across 3 difficulty tiers.
+#
+# Prompts include a standard preamble (added by runner.py) requesting:
+# - Self-contained .py script (not notebook)
+# - Save InferenceData to 'results.nc'
+# - Print convergence diagnostics to stdout
+
+tasks:
+  # ===== Tier 1: Basic (T1-T4) =====
+
+  T1:
+    name: Simple Linear Regression
+    tier: basic
+    dataset: mtcars.csv
+    skill_coverage:
+      - basic model structure
+      - priors
+      - inference
+      - basic diagnostics
+    prompt: |
+      Using PyMC, build a Bayesian linear regression model to predict fuel efficiency
+      (mpg) from vehicle weight (wt) and horsepower (hp) using the mtcars dataset.
+      Include appropriate priors, run inference, and check convergence diagnostics.
+
+      The data is at: data/mtcars.csv
+
+  T2:
+    name: Logistic Regression
+    tier: basic
+    dataset: titanic.csv
+    skill_coverage:
+      - GLM
+      - Bernoulli likelihood
+      - sigmoid link
+    prompt: |
+      Build a Bayesian logistic regression model using PyMC to predict passenger
+      survival on the Titanic based on age, sex, and passenger class. Use appropriate
+      priors for a classification problem, run inference, and evaluate the model.
+
+      The data is at: data/titanic.csv
+
+  T3:
+    name: Poisson Regression
+    tier: basic
+    dataset: synthetic/soccer_goals.csv
+    skill_coverage:
+      - count data
+      - exponential link
+      - overdispersion check
+    prompt: |
+      Model the number of goals scored by soccer teams in a season using Bayesian
+      Poisson regression in PyMC. Include team-level predictors (attack strength,
+      defense strength). Check for overdispersion and run appropriate diagnostics.
+
+      The data is at: data/synthetic/soccer_goals.csv
+
+  T4:
+    name: Prior Predictive Check
+    tier: basic
+    dataset: null
+    skill_coverage:
+      - prior selection
+      - prior predictive workflow
+    prompt: |
+      I have this PyMC model for predicting house prices:
+
+      ```python
+      with pm.Model() as model:
+          alpha = pm.Normal("alpha", mu=0, sigma=100)
+          beta = pm.Normal("beta", mu=0, sigma=100)
+          sigma = pm.HalfNormal("sigma", sigma=100)
+          mu = alpha + beta * sqft
+          y = pm.Normal("y", mu=mu, sigma=sigma, observed=price)
+      ```
+
+      Assume sqft ranges from 500 to 5000 and prices range from $50,000 to $2,000,000.
+
+      Conduct prior predictive checks and explain whether these priors are appropriate.
+      If not, suggest better priors with justification. Then build the improved model,
+      generate synthetic data in the appropriate range, run inference, and verify
+      convergence.
+
+  # ===== Tier 2: Intermediate (T5-T8) =====
+
+  T5:
+    name: Hierarchical Model (Non-Centered)
+    tier: intermediate
+    dataset: null
+    skill_coverage:
+      - non-centered parameterization
+      - divergence diagnosis
+      - hierarchical structure
+    prompt: |
+      Implement the classic 8-schools problem in PyMC using a NON-CENTERED
+      parameterization. Use the following data:
+
+      effects = [28, 8, -3, 7, -1, 1, 18, 12]
+      std = [15, 10, 16, 11, 9, 11, 10, 18]
+
+      Explain why non-centered parameterization is preferred for this problem.
+      Run inference and report convergence diagnostics including divergences,
+      r_hat, and ESS.
+
+  T6:
+    name: Ordinal Regression
+    tier: intermediate
+    dataset: gss_2022.csv
+    skill_coverage:
+      - specialized likelihoods
+      - OrderedLogistic
+      - ordinal outcomes
+    prompt: |
+      Using the GSS 2022 survey data, build a Bayesian model to predict job
+      satisfaction (satjob, an ordinal variable with 4 levels) from depression
+      (hlthdep), age, and sex.
+
+      Key considerations:
+      - satjob is ordinal (1=Very Dissatisfied to 4=Very Satisfied)
+      - Handle missing values appropriately
+      - Choose a model that respects the ordinal nature of the outcome
+
+      The data is at: data/gss_2022.csv
+
+  T7:
+    name: Time Series AR(2)
+    tier: intermediate
+    dataset: airline_passengers.csv
+    skill_coverage:
+      - time series
+      - autoregressive models
+      - prediction
+    prompt: |
+      Fit an AR(2) model to monthly airline passenger data using PyMC. The data
+      shows clear trend and seasonality. Implement the model, run inference, and
+      generate 12-month forecasts with uncertainty intervals.
+
+      The data is at: data/airline_passengers.csv
+
+  T8:
+    name: Missing Data Handling
+    tier: intermediate
+    dataset: gss_2022.csv
+    skill_coverage:
+      - missing data
+      - imputation
+      - model-based handling
+    prompt: |
+      The GSS 2022 dataset has extensive missing data across many variables.
+      Build a Bayesian regression model predicting life satisfaction (lifenow,
+      scale 1-10) from depression (hlthdep), stress, financial satisfaction
+      (satfin), and age.
+
+      The data has ~30,000 missing values across 27 columns. Handle the missing
+      data in a principled way — do NOT simply drop all rows with any missing
+      values, as this would lose most of the data. Use an approach that
+      preserves as much information as possible.
+
+      The data is at: data/gss_2022.csv
+
+  # ===== Tier 3: Advanced (T9-T12) =====
+
+  T9:
+    name: Gaussian Process (HSGP)
+    tier: advanced
+    dataset: mauna_loa_co2.csv
+    skill_coverage:
+      - HSGP
+      - periodic kernels
+      - GP hyperparameters
+    prompt: |
+      Fit a Gaussian Process model to the Mauna Loa CO2 dataset using PyMC. The
+      data has both a long-term trend and annual seasonal pattern. Use appropriate
+      GP approximations for computational efficiency. Explain your kernel choices.
+
+      The data is at: data/mauna_loa_co2.csv
+
+  T10:
+    name: Horseshoe Variable Selection
+    tier: advanced
+    dataset: gss_2022.csv
+    skill_coverage:
+      - regularized horseshoe prior
+      - variable selection
+      - shrinkage
+    prompt: |
+      Using the GSS 2022 data, build an ordinal regression model predicting job
+      satisfaction (satjob) from ALL available predictors: hlthdep, stress,
+      feelnerv, worry, wrkmeangfl, richwork, satfin, finrela, age, sex,
+      realrinc, anxiety, and hours_worked.
+
+      With 13 predictors, use a regularized horseshoe prior (Piironen & Vehtari
+      2017) to perform Bayesian variable selection — shrinking unimportant
+      coefficients toward zero while preserving large effects. Report which
+      variables the model identifies as important.
+
+      Handle missing data appropriately. The data is at: data/gss_2022.csv
+
+  T11:
+    name: Monotonic Ordinal Predictors
+    tier: advanced
+    dataset: gss_2022.csv
+    skill_coverage:
+      - monotonic effects
+      - Dirichlet simplex
+      - ordinal predictors
+    prompt: |
+      Using the GSS 2022 data, build a model predicting job satisfaction (satjob)
+      from ordinal predictors: stress (ordinal, multiple levels), feelnerv
+      (ordinal), worry (ordinal), and wrkmeangfl (ordinal).
+
+      These predictors are ordinal — their levels have a natural ordering but
+      the spacing between levels is unknown. Implement monotonic effects using
+      a Dirichlet simplex parameterization to respect the ordinal structure
+      of these predictors, rather than treating them as continuous or using
+      dummy coding.
+
+      Handle missing data appropriately. The data is at: data/gss_2022.csv
+
+  T12:
+    name: Model Comparison Pipeline
+    tier: advanced
+    dataset: synthetic/regression_comparison.csv
+    skill_coverage:
+      - model comparison
+      - LOO-CV
+      - Pareto k diagnostics
+    prompt: |
+      I have three competing models for my data: (1) simple linear regression,
+      (2) linear regression with quadratic term, (3) robust regression with
+      Student-t errors. Implement all three in PyMC, compare them using LOO-CV,
+      check Pareto k diagnostics, and recommend which model to use with
+      justification.
+
+      The data is at: data/synthetic/regression_comparison.csv

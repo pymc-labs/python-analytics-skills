@@ -1,0 +1,6 @@
+parameter,true_value
+base_psi,0.3
+psi_habitat_effect,0.4
+base_mu,1.5
+mu_habitat_effect,1.0
+mu_elevation_effect,-0.0005

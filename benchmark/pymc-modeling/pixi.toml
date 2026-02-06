@@ -1,0 +1,45 @@
+[workspace]
+name = "pymc-skill-benchmark"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.11,<3.14"
+numpy = ">=1.24"
+polars = ">=1.0"
+pyyaml = ">=6.0"
+pymc = ">=5.10"
+arviz = ">=0.18"
+nutpie = ">=0.12"
+pymc-bart = ">=0.6"
+scipy = ">=1.10"
+matplotlib = ">=3.7"
+pytest = ">=9.0.2,<10"
+
+[tasks]
+# Data
+generate-data = "python -m src.data_generator"
+
+# Individual pipeline stages
+run-task = "python -m src.cli run"
+run-all = "python -m src.cli run --all"
+extract-all = "python -m src.cli extract --all"
+execute-all = "python -m src.cli execute --all"
+diagnose-all = "python -m src.cli diagnose --all"
+score-all = "python -m src.cli score --all"
+
+# Full pipeline
+pipeline = "python -m src.cli pipeline"
+benchmark-all = "python -m src.cli pipeline --all --reps 3 --no-llm"
+benchmark-all-llm = "python -m src.cli pipeline --all --reps 3"
+
+# Analysis
+summary = "python -m src.cli analyze --summary"
+effects = "python -m src.cli analyze --effects"
+report = "python -m src.cli analyze --report"
+
+# Utilities
+list-tasks = "python -m src.cli list-tasks"
+status = "python -m src.cli status"
+cleanup = "python -m src.cli cleanup"
+test = "pytest tests/ -v"

@@ -12,6 +12,12 @@ __pycache__/
 *.swp
 *.swo
 
+# Benchmark results
+results/
+
+# AI
+plans/
+
 # OS
 .DS_Store
 Thumbs.db
