@@ -1,0 +1,33 @@
+[workspace]
+name = "pymc-skill-benchmark"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.11,<3.14"
+numpy = ">=1.24"
+polars = ">=1.0"
+pyyaml = ">=6.0"
+pymc = ">=5.10"
+arviz = ">=0.18"
+nutpie = ">=0.12"
+scipy = ">=1.10"
+matplotlib = ">=3.7"
+pytest = ">=9.0"
+
+[tasks]
+# Data preparation
+prepare-data = "python scripts/prepare_data.py"
+
+# Benchmark commands
+run = "python -m src.cli run"
+run-all = "python -m src.cli run --all"
+score = "python -m src.cli score"
+score-all = "python -m src.cli score --all"
+analyze = "python -m src.cli analyze"
+validate = "python -m src.cli validate"
+list-tasks = "python -m src.cli list-tasks"
+status = "python -m src.cli status"
+
+# Testing
+test = "MPLBACKEND=Agg pytest tests/ -v"

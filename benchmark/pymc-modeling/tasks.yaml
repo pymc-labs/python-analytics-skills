@@ -1,0 +1,146 @@
+# PyMC Skill Benchmark — Task Definitions
+# 5 tasks targeting specific skill coverage areas.
+# No basic models — every task tests something the skill explicitly teaches.
+
+preamble: |
+  You are working in a directory that contains data files in data/.
+  Write a Python script called model.py that builds a Bayesian model using PyMC.
+  Run the script yourself. If it fails, fix it and try once more.
+  Save the InferenceData to results.nc after sampling.
+  Available packages: PyMC, ArviZ, nutpie, NumPy, SciPy, matplotlib, polars.
+
+tasks:
+  T1_hierarchical:
+    name: "Hierarchical model (8 schools)"
+    prompt: |
+      A study measured the effect of coaching programs on SAT scores at 8 schools.
+      The observed effects (in points) and standard errors are:
+
+      effects = [28, 8, -3, 7, -1, 1, 18, 12]
+      std = [15, 10, 16, 11, 9, 11, 10, 18]
+
+      Build a hierarchical Bayesian model that estimates each school's effect while
+      sharing information across schools. Run inference and report convergence
+      diagnostics including any divergences.
+    data_files: []
+    judge_rubric: |
+      Score 0 if no PyMC model defined.
+      1 = any hierarchical structure (partial pooling attempted)
+      2 = + hyperpriors on group-level mean and variance
+      3 = + non-centered parameterization (offset + scale pattern)
+      4 = + reasonable priors on hyperparameters (not overly narrow/wide)
+      5 = + Deterministic for derived group effects (or equivalent reconstruction)
+    best_practices_patterns:
+      - 'coords'
+      - 'dims'
+      - 'nutpie'
+      - 'random_seed'
+
+  T2_ordinal:
+    name: "Ordinal regression (GSS satisfaction)"
+    prompt: |
+      Using the GSS 2022 survey data, build a Bayesian model to predict job
+      satisfaction (satjob) from depression (hlthdep), age, and sex.
+
+      satjob is an ordinal variable with 4 ordered levels (1=Very Dissatisfied,
+      2=A Little Dissatisfied, 3=Moderately Satisfied, 4=Very Satisfied).
+      Choose a model that respects the ordinal nature of the outcome.
+
+      The data is at: data/gss_2022_clean.csv
+    data_files:
+      - gss_2022_clean.csv
+    judge_rubric: |
+      Score 0 if no PyMC model defined.
+      1 = any ordinal-aware model (not treating outcome as continuous)
+      2 = + uses OrderedLogistic or OrderedProbit distribution
+      3 = + ordered transform on cutpoints (enforces monotonicity)
+      4 = + informative or reasonable cutpoint priors
+      5 = + variable names and dimension names don't conflict (no "cutpoints" for both)
+    best_practices_patterns:
+      - 'coords'
+      - 'dims'
+      - 'nutpie'
+      - 'random_seed'
+      - 'OrderedLogistic|OrderedProbit'
+
+  T3_model_comparison:
+    name: "Model comparison (LOO-CV)"
+    prompt: |
+      I have data with a nonlinear pattern and possible outliers. Implement three
+      competing Bayesian models: (1) linear regression, (2) quadratic regression,
+      and (3) robust regression with Student-t errors. Compare them using LOO
+      cross-validation, check the Pareto-k diagnostics, and recommend which model
+      to use.
+
+      The data is at: data/synthetic/regression_comparison.csv
+      Columns: x, y
+    data_files:
+      - synthetic/regression_comparison.csv
+    judge_rubric: |
+      Score 0 if no PyMC model defined.
+      1 = multiple models defined (at least 2)
+      2 = + all three models fitted (linear, quadratic, robust)
+      3 = + LOO computed with log_likelihood present in InferenceData
+      4 = + Pareto-k diagnostics checked (plot or summary)
+      5 = + comparison table produced with clear decision rule for model selection
+    best_practices_patterns:
+      - 'coords'
+      - 'dims'
+      - 'nutpie'
+      - 'random_seed'
+      - 'compute_log_likelihood|log_likelihood'
+      - 'az\.compare|az\.loo'
+
+  T4_gaussian_process:
+    name: "Gaussian process (Mauna Loa CO2)"
+    prompt: |
+      Fit a Gaussian process model to the Mauna Loa CO2 dataset. The data shows
+      a clear long-term upward trend and an annual seasonal cycle. Model both
+      components and explain your kernel choices.
+
+      The data is at: data/mauna_loa_co2.csv
+      Columns: date, co2
+    data_files:
+      - mauna_loa_co2.csv
+    judge_rubric: |
+      Score 0 if no PyMC model defined.
+      1 = any GP model defined
+      2 = + separate trend and seasonal components (additive or multiplicative)
+      3 = + uses HSGP or HSGPPeriodic (scalable GP approximation)
+      4 = + appropriate kernel choices (e.g., Matern for trend, Periodic for season)
+      5 = + InverseGamma or well-justified lengthscale prior + reasonable m/c parameters
+    best_practices_patterns:
+      - 'coords'
+      - 'dims'
+      - 'nutpie'
+      - 'random_seed'
+      - 'HSGP|HSGPPeriodic'
+
+  T5_horseshoe:
+    name: "Sparse variable selection (horseshoe)"
+    prompt: |
+      Using the GSS 2022 data, build a regression model predicting financial
+      satisfaction (satfin, scale 1-3) from all available predictors: age, sex,
+      hlthdep, stress, feelnerv, worry, wrkmeangfl, richwork, realrinc, anxiety,
+      and hours_worked.
+
+      With 11 predictors, many may be irrelevant. Use shrinkage priors to
+      identify which variables matter. Report which predictors the model
+      identifies as important vs shrunk to zero.
+
+      The data is at: data/gss_2022_clean.csv
+    data_files:
+      - gss_2022_clean.csv
+    judge_rubric: |
+      Score 0 if no PyMC model defined.
+      1 = any shrinkage prior used (not flat priors on all coefficients)
+      2 = + global-local shrinkage structure (horseshoe, Finnish horseshoe, or similar)
+      3 = + regularized variant (slab component) or R2D2 prior
+      4 = + high target_accept (>=0.95) for horseshoe geometry
+      5 = + clear identification of important vs shrunk-to-zero variables in output
+    best_practices_patterns:
+      - 'coords'
+      - 'dims'
+      - 'nutpie'
+      - 'random_seed'
+      - 'target_accept'
