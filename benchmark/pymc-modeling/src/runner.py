@@ -34,11 +34,10 @@ BASE_FLAGS = [
     "--tools", "Bash,Read,Write,Glob,Grep",
     "--disable-slash-commands",
     "--no-session-persistence",
-    "--max-budget-usd", "2.0",
     "--dangerously-skip-permissions",
 ]
 
-TIMEOUT_SECONDS = 600  # 10 minutes
+DEFAULT_TIMEOUT = 600  # 10 minutes
 
 
 def _kill_process_group(proc: subprocess.Popen):
@@ -71,6 +70,52 @@ def _kill_process_group(proc: subprocess.Popen):
         proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         pass
+
+
+def _kill_orphans(work_dir: Path):
+    """Kill ALL processes whose cwd or cmdline references work_dir.
+
+    Loops until zero matches — a dying process can spawn children between
+    sweeps, so a single pass is not sufficient. Guaranteed clean on return.
+    """
+    work_dir_str = str(work_dir)
+    my_pid = os.getpid()
+    total_killed = []
+
+    for sweep in range(10):
+        killed = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            if pid == my_pid:
+                continue
+            try:
+                # Check cwd
+                cwd = os.readlink(f"/proc/{pid}/cwd")
+                if work_dir_str in cwd:
+                    os.kill(pid, signal.SIGKILL)
+                    killed.append(pid)
+                    continue
+                # Check cmdline
+                cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode(
+                    errors="replace"
+                )
+                if work_dir_str in cmdline:
+                    os.kill(pid, signal.SIGKILL)
+                    killed.append(pid)
+            except (ProcessLookupError, PermissionError, OSError):
+                continue
+        if not killed:
+            break
+        total_killed.extend(killed)
+        time.sleep(0.5)  # let children die before next sweep
+
+    if total_killed:
+        logger.warning(
+            f"Killed {len(total_killed)} orphan(s) over {sweep + 1} sweep(s) "
+            f"in {work_dir}: {total_killed}"
+        )
 
 
 @dataclass
@@ -130,6 +175,19 @@ def _setup_working_dir(task_id: str, task_config: dict) -> Path:
         shutil.copy2(src, dest)
 
     return work_dir
+
+
+def is_corrupted_model(path: Path) -> bool:
+    """Check if a model.py file is actually a library file (e.g., pymc/dims/model.py).
+
+    Returns True if the first 200 bytes contain a copyright or license header,
+    indicating this is installed package code rather than Claude-generated code.
+    """
+    try:
+        header = path.read_text(errors="replace")[:200]
+    except OSError:
+        return False
+    return "Copyright" in header or "Licensed under" in header
 
 
 def _build_prompt(preamble: str, task_prompt: str) -> str:
@@ -296,10 +354,11 @@ def run_single(
     # Build prompt and command
     prompt = _build_prompt(preamble, task["prompt"])
     cmd = _build_command(condition)
+    timeout = task.get("timeout", DEFAULT_TIMEOUT)
 
     # Run Claude in its own process group so we can kill the entire tree
     # (including python model.py spawned by Bash tool) on timeout.
-    logger.info(f"Running: {task_id} {condition} rep{rep}")
+    logger.info(f"Running: {task_id} {condition} rep{rep} (timeout={timeout}s)")
     start = time.time()
     raw = ""
     error = ""
@@ -314,15 +373,15 @@ def run_single(
         start_new_session=True,  # new process group
     )
     try:
-        stdout, stderr = proc.communicate(input=prompt, timeout=TIMEOUT_SECONDS)
+        stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
         raw = stdout
         elapsed = time.time() - start
         error = stderr if proc.returncode != 0 else ""
     except subprocess.TimeoutExpired:
         # Kill the entire process group
         _kill_process_group(proc)
-        elapsed = TIMEOUT_SECONDS
-        error = f"Timeout after {TIMEOUT_SECONDS}s"
+        elapsed = timeout
+        error = f"Timeout after {timeout}s"
         logger.warning(f"Timeout: {task_id} {condition} rep{rep}")
     except Exception as e:
         _kill_process_group(proc)
@@ -332,6 +391,9 @@ def run_single(
         # Ensure nothing survives even on normal completion —
         # Claude's Bash tool may have left background processes.
         _kill_process_group(proc)
+        # Kill any grandchild processes that escaped the process group
+        # (e.g., nutpie sampler workers spawned by model.py)
+        _kill_orphans(work_dir)
 
     # Parse response
     parsed = _parse_response(raw) if raw else {}
@@ -345,13 +407,22 @@ def run_single(
         if src.exists():
             shutil.copy2(src, run_dir / artifact)
 
-    # Also check if artifacts were written to subdirectories
-    for nc_file in work_dir.rglob("results.nc"):
-        if nc_file != work_dir / "results.nc":
-            shutil.copy2(nc_file, run_dir / "results.nc")
-    for py_file in work_dir.rglob("model.py"):
-        if py_file != work_dir / "model.py":
-            shutil.copy2(py_file, run_dir / "model.py")
+    # If results.nc wasn't at the root, check subdirectories (first match only)
+    if not (run_dir / "results.nc").exists():
+        for nc_file in work_dir.rglob("results.nc"):
+            if nc_file != work_dir / "results.nc":
+                logger.info(f"Found results.nc in subdirectory: {nc_file}")
+                shutil.copy2(nc_file, run_dir / "results.nc")
+                break
+
+    # Corruption detection: reject model.py that is actually a library file
+    # (e.g., pymc/dims/model.py found by rglob in previous versions)
+    model_dest = run_dir / "model.py"
+    if model_dest.exists() and is_corrupted_model(model_dest):
+        logger.error(
+            f"CORRUPTION: {model_dest} contains a library copyright header — removing"
+        )
+        model_dest.unlink()
 
     # Save raw response
     if raw:

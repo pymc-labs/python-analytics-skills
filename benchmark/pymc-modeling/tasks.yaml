@@ -93,6 +93,7 @@ tasks:
 
   T4_gaussian_process:
     name: "Gaussian process (Mauna Loa CO2)"
+    timeout: 900
     prompt: |
       Fit a Gaussian process model to the Mauna Loa CO2 dataset. The data shows
       a clear long-term upward trend and an annual seasonal cycle. Model both

@@ -13,6 +13,7 @@ from src.runner import (
     _parse_response,
     get_run_dir,
     is_cached,
+    is_corrupted_model,
     load_tasks,
     verify_isolation,
     verify_token_difference,
@@ -162,3 +163,42 @@ def test_is_cached_with_metadata(tmp_path):
     (run_dir / "metadata.json").write_text("{}")
     with patch("src.runner.RUNS_DIR", tmp_path):
         assert is_cached("T1_hierarchical", "no_skill", 0)
+
+
+class TestIsCorruptedModel:
+    """Tests for is_corrupted_model corruption detection."""
+
+    def test_library_file_with_copyright(self, tmp_path):
+        """File with Copyright header is detected as corrupted."""
+        model = tmp_path / "model.py"
+        model.write_text(
+            '#   Copyright 2024 The PyMC Developers\n'
+            '#   Licensed under the Apache License, Version 2.0\n'
+            'import pymc as pm\n'
+        )
+        assert is_corrupted_model(model)
+
+    def test_library_file_with_licensed_under(self, tmp_path):
+        """File with Licensed under header is detected as corrupted."""
+        model = tmp_path / "model.py"
+        model.write_text(
+            '# Licensed under the MIT License\n'
+            'def foo(): pass\n'
+        )
+        assert is_corrupted_model(model)
+
+    def test_normal_model_not_corrupted(self, tmp_path):
+        """Normal Claude-generated model.py is not flagged."""
+        model = tmp_path / "model.py"
+        model.write_text(
+            'import pymc as pm\n'
+            'import numpy as np\n'
+            'with pm.Model() as model:\n'
+            '    mu = pm.Normal("mu", 0, 1)\n'
+        )
+        assert not is_corrupted_model(model)
+
+    def test_nonexistent_file(self, tmp_path):
+        """Non-existent file returns False (not corrupted)."""
+        model = tmp_path / "model.py"
+        assert not is_corrupted_model(model)

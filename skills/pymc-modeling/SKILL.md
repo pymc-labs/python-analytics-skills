@@ -79,6 +79,13 @@ with model:
         nuts_sampler="nutpie",
         random_seed=42,
     )
+idata.to_netcdf("results.nc")  # Save immediately after sampling
+```
+
+**Important**: nutpie does not store log_likelihood automatically (it silently ignores `idata_kwargs={"log_likelihood": True}`). If you need LOO-CV or model comparison, compute it after sampling:
+
+```python
+pm.compute_log_likelihood(idata, model=model)
 ```
 
 ### PyMC Native Sampling
@@ -348,17 +355,18 @@ InferenceData preserves the full Bayesian workflow:
 ### Workflow Pattern
 
 ```python
-# Save after each major step
+# Save IMMEDIATELY after sampling — late crashes (post-MCMC) destroy valid results
 with model:
     idata = pm.sample(nuts_sampler="nutpie")
-idata.to_netcdf("results/step1_posterior.nc")
+idata.to_netcdf("results.nc")  # Save before any post-processing!
 
+# Then do posterior predictive, diagnostics, etc.
 with model:
     pm.sample_posterior_predictive(idata, extend_inferencedata=True)
-idata.to_netcdf("results/step2_with_ppc.nc")
+idata.to_netcdf("results.nc")  # Update with posterior predictive
 
 # Resume later
-idata = az.from_netcdf("results/step2_with_ppc.nc")
+idata = az.from_netcdf("results.nc")
 az.plot_ppc(idata)  # Continue analysis
 ```
 
@@ -410,7 +418,7 @@ with pm.Model() as poisson:
 
 ### Gaussian Processes
 
-**Default to HSGP** for most GP problems (n > 500, 1-3D inputs). It's O(nm) instead of O(n³):
+**Always prefer HSGP** for GP problems with 1-3D inputs. It's O(nm) instead of O(n³), and even at n=200 exact GP (`pm.gp.Marginal`) is prohibitively slow for MCMC:
 
 ```python
 with pm.Model() as gp_model:
@@ -430,7 +438,7 @@ with pm.Model() as gp_model:
     y = pm.Normal("y", mu=f, sigma=sigma, observed=y_obs)
 ```
 
-For periodic patterns, use `pm.gp.HSGPPeriodic`. For small datasets (n < 500), use `pm.gp.Marginal` or `pm.gp.Latent`.
+For periodic patterns, use `pm.gp.HSGPPeriodic`. Only use `pm.gp.Marginal` or `pm.gp.Latent` for very small datasets (n < ~50) where exact inference is specifically needed.
 
 See [references/gp.md](references/gp.md) for:
 - **HSGP parameter selection** (choosing m and c, automatic heuristics)
@@ -502,6 +510,34 @@ See [references/mixtures.md](references/mixtures.md) for:
 - Marginalized mixtures (pymc-extras)
 - Diagnostics for mixture models
 
+### Sparse Regression / Horseshoe
+
+Use the regularized (Finnish) horseshoe prior for high-dimensional regression with expected sparsity:
+
+```python
+import pytensor.tensor as pt
+
+with pm.Model(coords={"features": feature_names}) as sparse_model:
+    # Regularized horseshoe (Piironen & Vehtari, 2017)
+    tau = pm.HalfStudentT("tau", nu=2, sigma=1)  # global shrinkage
+    lam = pm.HalfStudentT("lam", nu=5, dims="features")  # local shrinkage
+    c2 = pm.InverseGamma("c2", alpha=1, beta=1)  # slab variance
+    z = pm.Normal("z", 0, 1, dims="features")
+
+    # Regularized shrinkage factor
+    lam_tilde = pt.sqrt(c2 / (c2 + tau**2 * lam**2))
+    beta = pm.Deterministic("beta", z * tau * lam * lam_tilde, dims="features")
+
+    mu = pm.math.dot(X, beta)
+    y = pm.Normal("y", mu=mu, sigma=sigma, observed=y_obs)
+
+    idata = pm.sample(nuts_sampler="nutpie", target_accept=0.95)
+```
+
+**Important**: Horseshoe priors create double-funnel geometry. Use `target_accept=0.95` or higher to avoid divergences.
+
+See [references/priors.md](references/priors.md) for Laplace, R2D2, and spike-and-slab alternatives.
+
 ### Specialized Likelihoods
 
 ```python
@@ -527,6 +563,8 @@ with pm.Model() as ordinal:
     y = pm.OrderedLogistic("y", eta=pm.math.dot(X, beta),
                            cutpoints=cutpoints, observed=y_obs)
 ```
+
+**Note**: Don't use the same name for a variable and a dimension. For example, if you have a dimension called `"cutpoints"`, don't also name a variable `"cutpoints"` — this causes shape errors.
 
 See [references/specialized_likelihoods.md](references/specialized_likelihoods.md) for:
 - Zero-inflated models (Poisson, Negative Binomial, Binomial)
