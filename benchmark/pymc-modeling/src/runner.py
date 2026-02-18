@@ -29,7 +29,8 @@ RUNS_DIR = RESULTS_DIR / "runs"
 # Claude CLI flags common to both conditions
 BASE_FLAGS = [
     "--print",
-    "--output-format", "json",
+    "--verbose",
+    "--output-format", "stream-json",
     "--model", "sonnet",
     "--tools", "Bash,Read,Write,Glob,Grep",
     "--disable-slash-commands",
@@ -205,32 +206,53 @@ def _build_command(condition: str) -> list[str]:
 
 
 def _parse_response(raw: str) -> dict:
-    """Parse Claude's JSON response, extracting tokens and tool calls.
+    """Parse Claude's stream-json response (NDJSON).
 
-    The --print --output-format json response has top-level keys:
-    type, subtype, is_error, duration_ms, num_turns, result,
-    usage, permission_denials, etc. No 'messages' field.
-    Tool usage is inferred from num_turns and permission_denials.
+    The --print --verbose --output-format stream-json output is
+    newline-delimited JSON. Each line has {"type": ...}:
+    - "system"    — hook events, init (ignored)
+    - "assistant" — Claude's messages with content blocks (tool_use, text)
+    - "result"    — final aggregated result (tokens, cost, num_turns)
+
+    Returns a dict compatible with the old single-JSON format, plus a
+    "turns" list of assistant message objects for thrashing analysis.
     """
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"error": "Failed to parse JSON response"}
+    lines = raw.strip().split("\n")
+    result_data = None
+    turns = []
+
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        msg_type = obj.get("type")
+        if msg_type == "result":
+            result_data = obj
+        elif msg_type == "assistant":
+            turns.append(obj)
+
+    if result_data is None:
+        return {"error": "No result object in stream-json output", "turns": turns}
 
     result = {
-        "input_tokens": data.get("usage", {}).get("input_tokens", 0),
-        "cache_creation_tokens": data.get("usage", {}).get(
+        "input_tokens": result_data.get("usage", {}).get("input_tokens", 0),
+        "cache_creation_tokens": result_data.get("usage", {}).get(
             "cache_creation_input_tokens", 0
         ),
-        "cache_read_tokens": data.get("usage", {}).get(
+        "cache_read_tokens": result_data.get("usage", {}).get(
             "cache_read_input_tokens", 0
         ),
-        "output_tokens": data.get("usage", {}).get("output_tokens", 0),
+        "output_tokens": result_data.get("usage", {}).get("output_tokens", 0),
         "tool_calls": [],
-        "result": data.get("result", ""),
-        "num_turns": data.get("num_turns", 0),
-        "is_error": data.get("is_error", False),
-        "cost_usd": data.get("total_cost_usd", 0.0),
+        "result": result_data.get("result", ""),
+        "num_turns": result_data.get("num_turns", 0),
+        "is_error": result_data.get("is_error", False),
+        "cost_usd": result_data.get("total_cost_usd", 0.0),
+        "turns": turns,
     }
 
     # Total input tokens = input + cache_creation + cache_read
@@ -241,12 +263,11 @@ def _parse_response(raw: str) -> dict:
     )
 
     # Extract tool calls from permission_denials (if any were denied)
-    for denial in data.get("permission_denials", []):
+    for denial in result_data.get("permission_denials", []):
         result["tool_calls"].append(denial.get("tool_name", "unknown"))
 
     # Check the result text for evidence of tool usage
-    # (when tools succeed, they don't appear in permission_denials)
-    result_text = data.get("result", "")
+    result_text = result_data.get("result", "")
     if "model.py" in result_text or "results.nc" in result_text:
         result["produced_artifacts"] = True
 
@@ -363,6 +384,11 @@ def run_single(
     raw = ""
     error = ""
 
+    # Strip CLAUDECODE to allow nested claude --print calls.
+    # Keep all other env vars (especially auth credentials) intact.
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -371,6 +397,7 @@ def run_single(
         text=True,
         cwd=str(work_dir),
         start_new_session=True,  # new process group
+        env=env,
     )
     try:
         stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
@@ -424,9 +451,16 @@ def run_single(
         )
         model_dest.unlink()
 
-    # Save raw response
+    # Save raw response (NDJSON from stream-json)
     if raw:
         (run_dir / "response.json").write_text(raw)
+
+    # Save turn-by-turn data for thrashing analysis
+    if parsed.get("turns"):
+        turns_path = run_dir / "turns.jsonl"
+        with open(turns_path, "w") as f:
+            for turn in parsed["turns"]:
+                f.write(json.dumps(turn) + "\n")
 
     # Save metadata
     result = RunResult(
@@ -434,7 +468,7 @@ def run_single(
         condition=condition,
         rep=rep,
         run_dir=run_dir,
-        success=bool(parsed and not error),
+        success=bool(parsed and not error and parsed.get("total_input_tokens", 0) > 0),
         wall_time=elapsed,
         input_tokens=parsed.get("input_tokens", 0),
         cache_creation_tokens=parsed.get("cache_creation_tokens", 0),

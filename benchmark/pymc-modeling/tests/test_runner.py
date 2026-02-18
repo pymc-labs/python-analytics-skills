@@ -72,21 +72,33 @@ def test_get_run_dir():
 
 
 def test_parse_response_valid():
-    """Parse a valid Claude JSON response (--print --output-format json)."""
-    response = json.dumps({
-        "type": "result",
-        "usage": {
-            "input_tokens": 100,
-            "cache_creation_input_tokens": 200,
-            "cache_read_input_tokens": 300,
-            "output_tokens": 400,
-        },
-        "result": "Created model.py and results.nc",
-        "num_turns": 5,
-        "is_error": False,
-        "total_cost_usd": 0.15,
-        "permission_denials": [],
-    })
+    """Parse a valid stream-json NDJSON response."""
+    lines = [
+        json.dumps({"type": "system", "subtype": "init", "data": {}}),
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Write", "input": {"file_path": "model.py"}},
+                ]
+            },
+        }),
+        json.dumps({
+            "type": "result",
+            "usage": {
+                "input_tokens": 100,
+                "cache_creation_input_tokens": 200,
+                "cache_read_input_tokens": 300,
+                "output_tokens": 400,
+            },
+            "result": "Created model.py and results.nc",
+            "num_turns": 5,
+            "is_error": False,
+            "total_cost_usd": 0.15,
+            "permission_denials": [],
+        }),
+    ]
+    response = "\n".join(lines)
     parsed = _parse_response(response)
     assert parsed["input_tokens"] == 100
     assert parsed["cache_creation_tokens"] == 200
@@ -95,27 +107,72 @@ def test_parse_response_valid():
     assert parsed["output_tokens"] == 400
     assert parsed["num_turns"] == 5
     assert parsed["tool_calls"] == []
+    assert len(parsed["turns"]) == 1
 
 
 def test_parse_response_with_denials():
     """Permission denials are captured as tool calls."""
-    response = json.dumps({
-        "usage": {"input_tokens": 100, "output_tokens": 200},
-        "result": "",
-        "num_turns": 3,
-        "permission_denials": [
-            {"tool_name": "Write", "tool_use_id": "x"},
-            {"tool_name": "Bash", "tool_use_id": "y"},
-        ],
-    })
+    lines = [
+        json.dumps({
+            "type": "result",
+            "usage": {"input_tokens": 100, "output_tokens": 200},
+            "result": "",
+            "num_turns": 3,
+            "permission_denials": [
+                {"tool_name": "Write", "tool_use_id": "x"},
+                {"tool_name": "Bash", "tool_use_id": "y"},
+            ],
+        }),
+    ]
+    response = "\n".join(lines)
     parsed = _parse_response(response)
     assert parsed["tool_calls"] == ["Write", "Bash"]
 
 
 def test_parse_response_invalid():
-    """Parse invalid JSON returns error."""
-    parsed = _parse_response("not json")
+    """Parse invalid NDJSON returns error."""
+    parsed = _parse_response("not json at all")
     assert "error" in parsed
+
+
+def test_parse_response_extracts_turns():
+    """Verify turns list is populated from assistant messages."""
+    lines = [
+        json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Let me write model.py"}]},
+        }),
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Write", "input": {"file_path": "model.py"}},
+                ]
+            },
+        }),
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "python model.py"}},
+                ]
+            },
+        }),
+        json.dumps({
+            "type": "result",
+            "usage": {"input_tokens": 50, "output_tokens": 100},
+            "result": "Done",
+            "num_turns": 3,
+            "is_error": False,
+            "total_cost_usd": 0.05,
+            "permission_denials": [],
+        }),
+    ]
+    response = "\n".join(lines)
+    parsed = _parse_response(response)
+    assert len(parsed["turns"]) == 3
+    assert parsed["turns"][0]["message"]["content"][0]["type"] == "text"
+    assert parsed["turns"][1]["message"]["content"][0]["name"] == "Write"
 
 
 def test_verify_isolation_clean():

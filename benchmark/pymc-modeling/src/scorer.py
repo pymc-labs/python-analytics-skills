@@ -1,10 +1,12 @@
-"""Benchmark scorer — 4-criterion rubric (20 max).
+"""Benchmark scorer — 6-criterion rubric (30 max).
 
 Criteria:
 1. Model produced (0-5): automated, checks results.nc
 2. Convergence (0-5): automated, reads r_hat/ESS/divergences from .nc
 3. Model appropriateness (0-5): LLM judge (Haiku) with task-specific rubric
 4. Best practices (0-5): regex on model.py for coords/dims, nutpie, etc.
+5. Thrashing (0-5): how many rewrite cycles before success (fewer = better)
+6. Efficiency (0-5): how many turns Claude needed (fewer = better)
 """
 
 import json
@@ -39,7 +41,11 @@ class ScoreResult:
     convergence: int = 0
     model_appropriateness: int = 0
     best_practices: int = 0
+    thrashing: int = 0
+    efficiency: int = 0
     total: int = 0
+    passed: bool = False
+    retries: int = 0
     details: dict = field(default_factory=dict)
 
     def compute_total(self):
@@ -48,6 +54,8 @@ class ScoreResult:
             + self.convergence
             + self.model_appropriateness
             + self.best_practices
+            + self.thrashing
+            + self.efficiency
         )
 
 
@@ -411,15 +419,15 @@ def _score_appropriateness_regex(
             (r'ordered|Ordered', "ordered_transform"),
             (r'cutpoint|threshold', "cutpoints"),
         ],
-        "T3_model_comparison": [
-            (r'az\.compare|arviz\.compare', "model_comparison"),
-            (r'compute_log_likelihood|log_likelihood', "log_likelihood"),
-            (r'khat|pareto', "pareto_k"),
+        "T3_stochastic_volatility": [
+            (r'GaussianRandomWalk', "gaussian_rw"),
+            (r'StudentT|Student', "student_t"),
+            (r'exp\s*\(', "exp_transform"),
         ],
-        "T4_gaussian_process": [
-            (r'HSGP|HSGPPeriodic', "hsgp"),
-            (r'Matern|ExpQuad|Periodic', "kernels"),
-            (r'InverseGamma', "lengthscale_prior"),
+        "T4_mixture": [
+            (r'NormalMixture|Mixture', "mixture_dist"),
+            (r'Dirichlet', "dirichlet"),
+            (r'ordered|univariate_ordered', "ordered_transform"),
         ],
         "T5_horseshoe": [
             (r'horseshoe|Horseshoe', "horseshoe"),
@@ -434,6 +442,272 @@ def _score_appropriateness_regex(
             details[f"regex_{name}"] = True
 
     return min(score, 5), details
+
+
+def _count_rewrites_from_turns(turns_path: Path) -> tuple[int, int]:
+    """Count model.py writes and bash executions from turns.jsonl.
+
+    Returns (model_writes, bash_runs) where:
+    - model_writes: Write tool calls targeting model.py
+    - bash_runs: Bash tool calls that execute model.py
+    """
+    model_writes = 0
+    bash_runs = 0
+
+    with open(turns_path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            # Assistant messages have a "message" key with "content" blocks
+            content = obj.get("message", {}).get("content", [])
+            if not isinstance(content, list):
+                continue
+
+            for block in content:
+                if block.get("type") != "tool_use":
+                    continue
+                tool_name = block.get("name", "")
+                tool_input = block.get("input", {})
+
+                if tool_name == "Write":
+                    file_path = tool_input.get("file_path", "")
+                    if "model.py" in file_path:
+                        model_writes += 1
+
+                elif tool_name == "Bash":
+                    command = tool_input.get("command", "")
+                    if re.search(r"python\s+.*model\.py", command):
+                        bash_runs += 1
+
+    return model_writes, bash_runs
+
+
+def score_thrashing(run_dir: Path) -> tuple[int, dict]:
+    """Score criterion 5: Answer thrashing (0-5, 5 = best).
+
+    Measures how many rewrite cycles Claude went through before producing
+    a working model. Fewer rewrites = skill provided correct patterns.
+
+    5 = 0 rewrites (single write, single run, success)
+    4 = 1 rewrite (one error-fix cycle)
+    3 = 2 rewrites
+    2 = 3 rewrites
+    1 = 4+ rewrites or recurring same error
+    0 = no model.py produced, or timeout with no progress
+    """
+    details = {}
+    turns_path = run_dir / "turns.jsonl"
+
+    if not turns_path.exists():
+        # Fallback: use num_turns from metadata as a rough proxy
+        meta_path = run_dir / "metadata.json"
+        if not meta_path.exists():
+            return 0, {"reason": "no metadata"}
+
+        meta = json.loads(meta_path.read_text())
+        num_turns = meta.get("num_turns", 0)
+        details["method"] = "fallback_num_turns"
+        details["num_turns"] = num_turns
+
+        if num_turns == 0:
+            return 0, details
+
+        # Relaxed thresholds when we don't have detailed turn data
+        # Assume ~1 rewrite per 6 extra turns beyond the initial ~6
+        estimated_rewrites = max(0, (num_turns - 6) // 6)
+        details["estimated_rewrites"] = estimated_rewrites
+
+        if estimated_rewrites == 0:
+            return 5, details
+        elif estimated_rewrites == 1:
+            return 4, details
+        elif estimated_rewrites == 2:
+            return 3, details
+        elif estimated_rewrites == 3:
+            return 2, details
+        else:
+            return 1, details
+
+    model_writes, bash_runs = _count_rewrites_from_turns(turns_path)
+    details["method"] = "turns_analysis"
+    details["model_writes"] = model_writes
+    details["bash_runs"] = bash_runs
+
+    if model_writes == 0:
+        details["reason"] = "no model.py writes"
+        return 0, details
+
+    # Rewrites = writes beyond the first one
+    rewrites = max(0, model_writes - 1)
+    details["rewrites"] = rewrites
+
+    if rewrites == 0:
+        return 5, details
+    elif rewrites == 1:
+        return 4, details
+    elif rewrites == 2:
+        return 3, details
+    elif rewrites == 3:
+        return 2, details
+    else:
+        return 1, details
+
+
+def score_efficiency(run_dir: Path) -> tuple[int, dict]:
+    """Score criterion 6: Efficiency (0-5, 5 = fastest).
+
+    Measures how many turns Claude needed. Fewer turns = more efficient.
+
+    5 = 1-6 turns
+    4 = 7-12 turns
+    3 = 13-18 turns
+    2 = 19-25 turns
+    1 = 26-35 turns
+    0 = >35 turns or timeout (0 turns)
+    """
+    details = {}
+    meta_path = run_dir / "metadata.json"
+
+    if not meta_path.exists():
+        return 0, {"reason": "no metadata"}
+
+    meta = json.loads(meta_path.read_text())
+    num_turns = meta.get("num_turns", 0)
+    details["num_turns"] = num_turns
+
+    if num_turns == 0:
+        return 0, details
+    elif num_turns <= 6:
+        return 5, details
+    elif num_turns <= 12:
+        return 4, details
+    elif num_turns <= 18:
+        return 3, details
+    elif num_turns <= 25:
+        return 2, details
+    elif num_turns <= 35:
+        return 1, details
+    else:
+        return 0, details
+
+
+def evaluate_pass_fail(
+    run_dir: Path,
+    model_produced_score: int,
+    convergence_score: int,
+) -> tuple[bool, dict]:
+    """Evaluate hard pass/fail gate for a benchmark run.
+
+    A run passes if all three conditions hold:
+    1. Sampling completed: model_produced >= 4 (>100 draws)
+    2. Convergence acceptable: convergence >= 3
+    3. Non-degenerate estimates: all posterior means finite, at least one var has std > 0
+    """
+    details: dict = {}
+
+    # Check 1: sampling completed
+    if model_produced_score < 4:
+        details["sampling_completed"] = False
+        details["reason"] = f"model_produced={model_produced_score} < 4"
+        return False, details
+    details["sampling_completed"] = True
+
+    # Check 2: convergence acceptable
+    if convergence_score < 3:
+        details["convergence_acceptable"] = False
+        details["reason"] = f"convergence={convergence_score} < 3"
+        return False, details
+    details["convergence_acceptable"] = True
+
+    # Check 3: non-degenerate posterior estimates
+    nc_path = run_dir / "results.nc"
+    if not nc_path.exists():
+        details["non_degenerate"] = False
+        details["reason"] = "no results.nc"
+        return False, details
+
+    try:
+        import arviz as az
+        import numpy as np
+
+        idata = az.from_netcdf(str(nc_path))
+        if not hasattr(idata, "posterior") or idata.posterior is None:
+            details["non_degenerate"] = False
+            details["reason"] = "no posterior group"
+            return False, details
+
+        all_finite = True
+        any_nonzero_std = False
+
+        for var_name in idata.posterior.data_vars:
+            values = idata.posterior[var_name].values
+            mean_val = np.mean(values)
+            std_val = np.std(values)
+
+            if not np.isfinite(mean_val):
+                all_finite = False
+                details["non_finite_var"] = var_name
+                break
+
+            if std_val > 0:
+                any_nonzero_std = True
+
+        if not all_finite:
+            details["non_degenerate"] = False
+            details["reason"] = f"non-finite mean in variable '{details.get('non_finite_var')}'"
+            return False, details
+
+        if not any_nonzero_std:
+            details["non_degenerate"] = False
+            details["reason"] = "all variables have zero std (degenerate)"
+            return False, details
+
+        details["non_degenerate"] = True
+
+    except Exception as e:
+        details["non_degenerate"] = False
+        details["reason"] = f"error checking posterior: {e}"
+        return False, details
+
+    return True, details
+
+
+def count_retries(run_dir: Path) -> tuple[int, dict]:
+    """Count raw error-fix cycles (model.py rewrites beyond the first).
+
+    Uses turns.jsonl if available, otherwise falls back to metadata heuristic.
+    """
+    details: dict = {}
+    turns_path = run_dir / "turns.jsonl"
+
+    if turns_path.exists():
+        model_writes, bash_runs = _count_rewrites_from_turns(turns_path)
+        details["method"] = "turns_analysis"
+        details["model_writes"] = model_writes
+        details["bash_runs"] = bash_runs
+        retries = max(0, model_writes - 1)
+        details["retries"] = retries
+        return retries, details
+
+    # Fallback: estimate from metadata num_turns
+    meta_path = run_dir / "metadata.json"
+    if not meta_path.exists():
+        details["method"] = "none"
+        details["reason"] = "no turns.jsonl or metadata"
+        return 0, details
+
+    meta = json.loads(meta_path.read_text())
+    num_turns = meta.get("num_turns", 0)
+    details["method"] = "fallback_num_turns"
+    details["num_turns"] = num_turns
+    retries = max(0, (num_turns - 6) // 6)
+    details["retries"] = retries
+    return retries, details
 
 
 def score_run(run_dir: Path, task_id: str, condition: str, rep: int) -> ScoreResult:
@@ -465,13 +739,32 @@ def score_run(run_dir: Path, task_id: str, condition: str, rep: int) -> ScoreRes
     result.best_practices = bp_score
     result.details["best_practices"] = bp_details
 
+    thr_score, thr_details = score_thrashing(run_dir)
+    result.thrashing = thr_score
+    result.details["thrashing"] = thr_details
+
+    eff_score, eff_details = score_efficiency(run_dir)
+    result.efficiency = eff_score
+    result.details["efficiency"] = eff_details
+
     result.compute_total()
+
+    passed, pf_details = evaluate_pass_fail(
+        run_dir, result.model_produced, result.convergence
+    )
+    result.passed = passed
+    result.details["pass_fail"] = pf_details
+
+    retries, retry_details = count_retries(run_dir)
+    result.retries = retries
+    result.details["retries"] = retry_details
 
     logger.info(
         f"Score {task_id} {condition} rep{rep}: "
         f"produced={result.model_produced} conv={result.convergence} "
         f"approp={result.model_appropriateness} bp={result.best_practices} "
-        f"total={result.total}"
+        f"thrash={result.thrashing} eff={result.efficiency} "
+        f"total={result.total} passed={result.passed} retries={result.retries}"
     )
 
     return result
@@ -481,6 +774,10 @@ def score_all(runs_dir: Path | None = None) -> list[ScoreResult]:
     """Score all completed runs."""
     if runs_dir is None:
         runs_dir = RUNS_DIR
+
+    # Load valid task IDs from tasks.yaml
+    with open(TASKS_PATH) as f:
+        valid_tasks = set(yaml.safe_load(f)["tasks"].keys())
 
     results = []
     for run_dir in sorted(runs_dir.iterdir()):
@@ -495,6 +792,16 @@ def score_all(runs_dir: Path | None = None) -> list[ScoreResult]:
         task_id = meta["task_id"]
         condition = meta["condition"]
         rep = meta["rep"]
+
+        if task_id not in valid_tasks:
+            logger.warning(f"Skipping unknown task_id '{task_id}' in {run_dir.name}")
+            continue
+
+        # Skip infrastructure failures that produced no work product
+        model_py = run_dir / "model.py"
+        if not meta.get("success", False) and not model_py.exists():
+            logger.info(f"Skipping failed run with no model.py: {run_dir.name}")
+            continue
 
         score = score_run(run_dir, task_id, condition, rep)
         results.append(score)
@@ -511,7 +818,11 @@ def score_all(runs_dir: Path | None = None) -> list[ScoreResult]:
             "convergence": score.convergence,
             "model_appropriateness": score.model_appropriateness,
             "best_practices": score.best_practices,
+            "thrashing": score.thrashing,
+            "efficiency": score.efficiency,
             "total": score.total,
+            "passed": score.passed,
+            "retries": score.retries,
             "details": score.details,
         }, indent=2))
 

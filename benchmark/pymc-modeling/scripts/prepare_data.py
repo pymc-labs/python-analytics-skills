@@ -2,15 +2,17 @@
 
 Produces cleaned/subsampled versions suitable for fast MCMC sampling:
 - GSS 2022: select relevant columns, drop nulls (~487 rows)
-- Mauna Loa CO2: keep every other row (~396 rows)
-- Regression comparison: copy as-is (150 rows)
+- S&P 500: subsample to ~750 rows of log returns
+- Mixture: synthetic 3-component Gaussian mixture (500 obs)
 """
 
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 
 DATA_DIR = Path(__file__).parent.parent / "data"
+SP500_SOURCE = Path.home() / "repos" / "pymc-examples" / "examples" / "data" / "SP500.csv"
 SEED = 42
 
 
@@ -32,29 +34,39 @@ def prepare_gss():
     print(f"GSS: {len(raw)} -> {len(clean)} rows -> {out}")
 
 
-def prepare_mauna_loa():
-    """Subsample Mauna Loa CO2 data for T4 (GP) task."""
-    raw = pl.read_csv(DATA_DIR / "mauna_loa_co2.csv")
-    # Keep every other row
-    sub = raw.gather_every(2)
-    out = DATA_DIR / "mauna_loa_co2.csv"
+def prepare_sp500():
+    """Subsample S&P 500 returns for T3 (stochastic volatility) task."""
+    raw = pl.read_csv(SP500_SOURCE)
+    # Subsample to ~750 rows (roughly 3 years of trading days)
+    sub = raw.head(750).select([
+        pl.col("Date").alias("date"),
+        pl.col("change").alias("returns"),
+    ])
+    out = DATA_DIR / "sp500_returns.csv"
     sub.write_csv(out)
-    print(f"Mauna Loa: {len(raw)} -> {len(sub)} rows -> {out} (overwritten)")
+    print(f"S&P 500: {len(raw)} -> {len(sub)} rows -> {out}")
 
 
-def prepare_regression():
-    """Copy regression comparison data as-is for T3 (model comparison) task."""
-    raw = pl.read_csv(DATA_DIR / "synthetic" / "regression_comparison.csv")
-    # Already small enough, just verify
-    out = DATA_DIR / "synthetic" / "regression_comparison.csv"
-    print(f"Regression: {len(raw)} rows (no change) -> {out}")
+def prepare_mixture():
+    """Generate synthetic 3-component Gaussian mixture for T4 (mixture) task."""
+    rng = np.random.default_rng(SEED)
+    centers = [-5.0, 0.0, 5.0]
+    sds = [0.5, 2.0, 0.75]
+    n = 500
+    # Uniform component assignment
+    components = rng.integers(0, len(centers), size=n)
+    x = np.array([rng.normal(centers[c], sds[c]) for c in components])
+    out = DATA_DIR / "synthetic" / "mixture_data.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame({"x": x}).write_csv(out)
+    print(f"Mixture: {n} observations (3 components) -> {out}")
 
 
 def main():
     print("Preparing benchmark datasets...")
     prepare_gss()
-    prepare_mauna_loa()
-    prepare_regression()
+    prepare_sp500()
+    prepare_mixture()
     print("Done.")
 
 

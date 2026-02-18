@@ -21,8 +21,8 @@ Every task targets something the skill explicitly teaches. No basic models — C
 |----|------|------------------------|------|
 | T1 | Hierarchical model (8 schools) | Non-centered parameterization, divergence diagnosis | Embedded in prompt |
 | T2 | Ordinal regression | `OrderedLogistic`, ordered transform, variable/dim name conflicts | `gss_2022_clean.csv` |
-| T3 | Model comparison (LOO-CV) | `pm.compute_log_likelihood()` after nutpie, correct `az.compare()` columns | `synthetic/regression_comparison.csv` |
-| T4 | Gaussian process (Mauna Loa CO2) | HSGP + HSGPPeriodic, InverseGamma lengthscale priors, `m`/`c` selection | `mauna_loa_co2.csv` |
+| T3 | Stochastic volatility (S&P 500 returns) | GaussianRandomWalk latent process, Student-T likelihood, exp transform | `sp500_returns.csv` |
+| T4 | Gaussian mixture model (clustering) | NormalMixture, Dirichlet weights, ordered transform for label switching | `synthetic/mixture_data.csv` |
 | T5 | Sparse variable selection | Regularized horseshoe, `target_accept=0.99`, R2D2 alternative | `gss_2022_clean.csv` |
 
 Prompts describe the *statistical problem* only — they never mention PyMC-specific patterns. The skill's value is knowing which PyMC tools and patterns to use.
@@ -73,8 +73,8 @@ pixi run prepare-data
 
 This produces:
 - `data/gss_2022_clean.csv` — 487 rows (13 columns, nulls dropped)
-- `data/mauna_loa_co2.csv` — 396 rows (every other month)
-- `data/synthetic/regression_comparison.csv` — 150 rows (unchanged)
+- `data/sp500_returns.csv` — 750 rows (daily log returns, ~3 years)
+- `data/synthetic/mixture_data.csv` — 500 rows (3-component Gaussian mixture)
 
 ## Running the Benchmark
 
@@ -167,9 +167,9 @@ benchmark/pymc-modeling/
 ├── data/
 │   ├── gss_2022.csv          # Raw GSS 2022 survey data
 │   ├── gss_2022_clean.csv    # Cleaned subset (487 rows)
-│   ├── mauna_loa_co2.csv     # CO2 measurements (396 rows)
+│   ├── sp500_returns.csv     # S&P 500 log returns (750 rows)
 │   └── synthetic/
-│       └── regression_comparison.csv  # Synthetic regression data (150 rows)
+│       └── mixture_data.csv  # Synthetic 3-component Gaussian mixture (500 rows)
 ├── results/                  # Created at runtime
 │   ├── runs/                 # Per-run directories (model.py, results.nc, metadata)
 │   ├── scores/               # Individual score JSONs

@@ -180,6 +180,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libxslt-1.1.43-h711ed8c_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/llvm-openmp-21.1.8-h4922eb0_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/llvmlite-0.46.0-py313hdd307be_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/logical-unification-0.4.7-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.10.0-h5888daf_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-4.0.0-pyhd8ed1ab_0.conda
@@ -196,8 +197,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.5-h2d0b736_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/nlohmann_json-3.12.0-h54a6638_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/numba-0.63.1-py313h5dce7c4_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/numcodecs-0.16.5-py313h08cd8bf_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.4.2-py313hf6604e3_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.3.5-py313hf6604e3_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/nutpie-0.16.5-py313h7ef63f5_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/obstore-0.8.2-py313h5c7d99a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openjpeg-2.5.4-h55fea9a_0.conda
@@ -2449,6 +2451,21 @@ packages:
   license_family: APACHE
   size: 6127279
   timestamp: 1765964409311
+- conda: https://conda.anaconda.org/conda-forge/linux-64/llvmlite-0.46.0-py313hdd307be_0.conda
+  sha256: 0e1bc6ee1c7885cc26c37fcd1a2095169a4e4e148860c600d3f685b6a4f32322
+  md5: d99ac09b331711fd12e16323ca8d96e4
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - libgcc >=14
+  - libstdcxx >=14
+  - libzlib >=1.3.1,<2.0a0
+  - python >=3.13,<3.14.0a0
+  - python_abi 3.13.* *_cp313
+  - zstd >=1.5.7,<1.6.0a0
+  license: BSD-2-Clause
+  license_family: BSD
+  size: 34130706
+  timestamp: 1765280056189
 - conda: https://conda.anaconda.org/conda-forge/noarch/logical-unification-0.4.7-pyhd8ed1ab_0.conda
   sha256: 5a3995f2b6c47d0b4842f3842490920e2dbf074854667d8649dd5abe81914a54
   md5: f2815c465aa44db830f0b31b7e6baaff
@@ -2641,6 +2658,30 @@ packages:
   license_family: MIT
   size: 136216
   timestamp: 1758194284857
+- conda: https://conda.anaconda.org/conda-forge/linux-64/numba-0.63.1-py313h5dce7c4_0.conda
+  sha256: 3ceba93570814df69969edff3156097dc0e86ccefa2ea2bdfe08f84b2023cf04
+  md5: dbdae1a85bb346d57fae63269def955a
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - _openmp_mutex >=4.5
+  - libgcc >=14
+  - libstdcxx >=14
+  - llvmlite >=0.46.0,<0.47.0a0
+  - numpy >=1.22.3,<2.4
+  - numpy >=1.23,<3
+  - python >=3.13,<3.14.0a0
+  - python_abi 3.13.* *_cp313
+  constrains:
+  - cudatoolkit >=11.2
+  - cuda-python >=11.6
+  - libopenblas !=0.3.6
+  - tbb >=2021.6.0
+  - cuda-version >=11.2
+  - scipy >=1.0
+  license: BSD-2-Clause
+  license_family: BSD
+  size: 5761715
+  timestamp: 1765466811957
 - conda: https://conda.anaconda.org/conda-forge/linux-64/numcodecs-0.16.5-py313h08cd8bf_0.conda
   sha256: 7c35d46639f8638849535a22cb7ae1b7210121be0c7b053d8e2ab7ed485e6bff
   md5: 0f394ef25fb81d1dec8ff4fa716f00bd
@@ -2659,24 +2700,24 @@ packages:
   license_family: MIT
   size: 808201
   timestamp: 1764782369322
-- conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.4.2-py313hf6604e3_1.conda
-  sha256: 2eb8be25a7504f058a153a84be70471e0ebbf6bd0411ae2b6d34904b89d86fe3
-  md5: ca9c6ba4beac38cb3d0a85afde27f94c
+- conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.3.5-py313hf6604e3_1.conda
+  sha256: 2f8aff2a17e4d43012e9863ef4392e6d5de3ae9da0c3e322831f8c5c3d86df71
+  md5: dce261869f78ba9b81b9091b084d328d
   depends:
   - python
   - libgcc >=14
-  - __glibc >=2.17,<3.0.a0
   - libstdcxx >=14
-  - liblapack >=3.9.0,<4.0a0
-  - libcblas >=3.9.0,<4.0a0
+  - __glibc >=2.17,<3.0.a0
   - python_abi 3.13.* *_cp313
+  - libcblas >=3.9.0,<4.0a0
+  - liblapack >=3.9.0,<4.0a0
   - libblas >=3.9.0,<4.0a0
   constrains:
   - numpy-base <0a0
   license: BSD-3-Clause
   license_family: BSD
-  size: 8857152
-  timestamp: 1770098515258
+  size: 8919234
+  timestamp: 1766383469748
 - conda: https://conda.anaconda.org/conda-forge/linux-64/nutpie-0.16.5-py313h7ef63f5_2.conda
   sha256: 2fae899a9c09e8be8442ae2553390553816320fecb989bbb2cad61264b392417
   md5: aaf2e4befdfa59d0c2df2f54b7681478

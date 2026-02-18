@@ -13,6 +13,12 @@ description: >
 
 Bayesian modeling workflow for PyMC v5+ with modern API patterns.
 
+Claude understands the fundamentals of Bayesian inference—priors, likelihoods, posterior distributions, and Bayes' theorem. It knows MCMC is the standard approach for posterior sampling and can explain what a hierarchical model is. But getting from these concepts to a correctly-specified, well-diagnosed, and efficiently-sampled PyMC model requires domain-specific knowledge that changes over time.
+
+This skill bridges that gap. It encodes modern best practices like using nutpie as the default sampler because it runs two to five times faster than the default NUTS implementation, choosing non-centered parameterization for hierarchical models to avoid pathological geometry, and reaching for HSGP instead of exact Gaussian processes for any dataset larger than a few hundred points. It covers the common pitfalls you will actually hit—why you are getting divergences and how to fix them, the specific error messages that indicate a shape mismatch or initialization failure, and when the centered parameterization actually performs better despite the folklore. It also details the correct API usage: how to structure coords and dims for readable InferenceData, why nutpie silently ignores log_likelihood requests and what to do about it, and the proper workflow for saving results to NetCDF.
+
+Without this skill, Claude might suggest outdated defaults like the slow default NUTS sampler, miss critical diagnostics such as ESS and r_hat checks, or recommend inefficient parameterizations that lead to divergences. With it, you get concise, battle-tested patterns that actually work in practice.
+
 **Notebook preference**: Use marimo for interactive modeling unless the project already uses Jupyter.
 
 ## Model Specification
@@ -36,7 +42,7 @@ with pm.Model(coords=coords) as model:
     y = pm.Normal("y", mu=mu, sigma=sigma, observed=y_obs, dims="obs")
 
     # Inference
-    idata = pm.sample()
+    idata = pm.sample(nuts_sampler="nutpie", random_seed=42)
 ```
 
 ### Coords and Dims
@@ -68,9 +74,9 @@ alpha = pm.Normal("alpha", mu_alpha, sigma_alpha, dims="group")
 
 ## Inference
 
-### Default Sampling (nutpie)
+### Default Sampling (nutpie — always use)
 
-Use nutpie as the default sampler—it's Rust-based and typically 2-5x faster:
+**Always** use nutpie or numpyro for sampling. Never use PyMC's default NUTS — it is 2-5x slower. nutpie is Rust-based and supports all standard PyMC models including time series, GPs, mixtures, and custom likelihoods:
 
 ```python
 with model:
@@ -88,14 +94,19 @@ idata.to_netcdf("results.nc")  # Save immediately after sampling
 pm.compute_log_likelihood(idata, model=model)
 ```
 
-### PyMC Native Sampling
+### If nutpie Is Not Installed
 
-Fall back to PyMC's NUTS when nutpie unavailable:
+Always use `nuts_sampler="nutpie"` or `nuts_sampler="numpyro"`. If neither is installed, install before sampling:
 
 ```python
-with model:
-    idata = pm.sample(draws=1000, tune=1000, chains=4, random_seed=42)
+import subprocess, sys
+try:
+    import nutpie
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "nutpie"])
 ```
+
+Do not fall back to PyMC's default NUTS sampler — it is 2-5x slower and should only be used temporarily for debugging model specification issues.
 
 ### Alternative MCMC Backends
 
@@ -615,7 +626,7 @@ Condition on observed values without intervention:
 ```python
 # Condition: observe y = 1 (doesn't break causal structure)
 with pm.observe(causal_model, {"y": 1}) as conditioned_model:
-    idata = pm.sample()
+    idata = pm.sample(nuts_sampler="nutpie")
     # Samples from P(x, z | y=1)
 ```
 
@@ -625,7 +636,7 @@ with pm.observe(causal_model, {"y": 1}) as conditioned_model:
 # Intervention + observation for causal queries
 with pm.do(causal_model, {"x": 2}) as m1:
     with pm.observe(m1, {"z": 0}) as m2:
-        idata = pm.sample()
+        idata = pm.sample(nuts_sampler="nutpie")
         # P(y | do(x=2), z=0)
 ```
 

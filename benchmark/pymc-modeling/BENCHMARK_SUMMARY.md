@@ -18,14 +18,15 @@ The benchmark uses five tasks, each targeting a specific PyMC modeling pattern d
 |------|--------|---------------------|
 | **T1: Hierarchical Model** | 8 Schools (SAT coaching) | Non-centered parameterization, divergence diagnosis |
 | **T2: Ordinal Regression** | GSS job satisfaction survey | OrderedLogistic, cutpoint priors, name/dimension conflicts |
-| **T3: Model Comparison** | Synthetic regression data | LOO-CV workflow, `compute_log_likelihood()`, Pareto-k diagnostics |
-| **T4: Gaussian Process** | Mauna Loa CO2 | HSGP + HSGPPeriodic, InverseGamma priors, kernel selection |
+| **T3: Stochastic Volatility** | S&P 500 log returns | GaussianRandomWalk latent process, Student-T likelihood, exp transform |
+| **T4: Gaussian Mixture** | Synthetic clustering data | NormalMixture, Dirichlet weights, ordered transform for label switching |
 | **T5: Sparse Selection** | GSS financial satisfaction | Regularized horseshoe, `target_accept=0.99`, R2D2 alternative |
 
 **Why these tasks matter:** Each tests something Claude commonly gets wrong without guidance. For example:
 - Without the skill, Claude uses centered parameterization for hierarchical models and hits divergences
 - Without the skill, Claude names a variable and dimension both "cutpoints", causing a `ValueError`
-- Without the skill, Claude attempts full O(n³) GPs instead of scalable HSGP approximations
+- Without the skill, Claude omits the ordered transform on mixture means, causing label switching
+- Without the skill, Claude doesn't use GaussianRandomWalk for latent volatility modeling
 
 ---
 
@@ -191,7 +192,7 @@ The 4-criterion rubric evaluates:
 With 3 replications per condition and paired comparison (same task, different condition), the design maximizes statistical power to detect skill effects.
 
 ### 6. **Practical Relevance**
-The tasks mirror real-world Bayesian modeling challenges: hierarchical data, ordinal outcomes, model comparison, time series with GPs, and high-dimensional variable selection.
+The tasks mirror real-world Bayesian modeling challenges: hierarchical data, ordinal outcomes, stochastic volatility, mixture modeling, and high-dimensional variable selection.
 
 ---
 
@@ -228,11 +229,11 @@ All datasets are sized so well-specified models sample in under 2 minutes:
 
 | Dataset | Source | Preparation |
 |---------|--------|-------------|
-| GSS 2022 | NORC | Cleaned (missing values dropped), subsampled to 500 rows |
-| Mauna Loa CO2 | NOAA | Subsampled to ~400 rows (every other month) |
-| Synthetic regression | Generated | 150 rows, includes nonlinear pattern + outliers |
+| GSS 2022 | NORC | Cleaned (missing values dropped), subsampled to ~487 rows |
+| S&P 500 returns | pymc-examples | Subsampled to 750 rows (~3 years of daily log returns) |
+| Synthetic mixture | Generated | 500 rows, 3 Gaussian components (centers -5, 0, 5) |
 
-The rationale: 3,544 rows with horseshoe priors can take 10+ minutes. 500 rows produces meaningful posteriors while keeping sampling fast.
+The rationale: 3,544 rows with horseshoe priors can take 10+ minutes. Smaller datasets produce meaningful posteriors while keeping sampling fast.
 
 ---
 
@@ -266,7 +267,7 @@ These constraints reflect hard-won experience:
 
 - **nutpie quirk**: nutpie ignores `idata_kwargs`, so `log_likelihood` can be silently dropped. The skill documents this.
 
-- **ArviZ API drift**: `az.compare()` returns `d_loo`/`dse` columns, not the older names. The skill has current API guidance.
+- **Label switching**: Mixture models without an ordered transform on component means produce uninterpretable posteriors. The skill documents the ordered transform pattern.
 
 - **Name conflicts**: PyMC forbids using the same string for both variable and dimension names. The skill warns about this; without it, ordinal models commonly crash.
 

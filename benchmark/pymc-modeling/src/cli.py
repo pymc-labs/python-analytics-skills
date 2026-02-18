@@ -18,6 +18,7 @@ from pathlib import Path
 
 import yaml
 
+from src.analysis import generate_report, load_scores
 from src.runner import (
     RESULTS_DIR,
     RUNS_DIR,
@@ -30,7 +31,6 @@ from src.runner import (
     verify_token_difference,
 )
 from src.scorer import score_all, score_run
-from src.analysis import generate_report, load_scores
 
 logger = logging.getLogger("benchmark")
 
@@ -128,9 +128,11 @@ def cmd_validate(args):
         elapsed = time.time() - start
         log(f"Wall time: {elapsed:.0f}s")
         log(f"Success: {result.success}")
-        log(f"Tokens: input={result.input_tokens} cache_creation={result.cache_creation_tokens} "
+        log(
+            f"Tokens: input={result.input_tokens} cache_creation={result.cache_creation_tokens} "
             f"cache_read={result.cache_read_tokens} output={result.output_tokens} "
-            f"total_input={result.total_input_tokens}")
+            f"total_input={result.total_input_tokens}"
+        )
         log(f"Tool calls: {result.tool_calls}")
         if result.error:
             log(f"Error: {result.error[:500]}")
@@ -150,7 +152,9 @@ def cmd_validate(args):
     else:
         ns_turns = no_meta.get("num_turns", 0)
         ws_turns = ws_meta.get("num_turns", 0)
-        log(f"PASS: Both runs completed (no_skill={ns_turns} turns, with_skill={ws_turns} turns)")
+        log(
+            f"PASS: Both runs completed (no_skill={ns_turns} turns, with_skill={ws_turns} turns)"
+        )
         checks.append(("runs_completed", True, []))
 
     # Check 2: No Skill tool calls
@@ -189,8 +193,11 @@ def cmd_validate(args):
         if nc.exists():
             try:
                 import arviz as az
+
                 idata = az.from_netcdf(str(nc))
-                has_posterior = hasattr(idata, "posterior") and idata.posterior is not None
+                has_posterior = (
+                    hasattr(idata, "posterior") and idata.posterior is not None
+                )
                 if has_posterior:
                     log(f"PASS: results.nc has posterior in {cond}")
                     checks.append((f"results_nc_{cond}", True, []))
@@ -243,7 +250,9 @@ def cmd_validate(args):
     (RESULTS_DIR / "validation.log").write_text("\n".join(log_lines))
 
     if passed < total:
-        log(f"\nValidation FAILED ({total - passed} failures). Fix issues before running full suite.")
+        log(
+            f"\nValidation FAILED ({total - passed} failures). Fix issues before running full suite."
+        )
         return 1
 
     log("\nValidation PASSED. Safe to run full suite.")
@@ -272,7 +281,9 @@ def cmd_status(args):
             for rep in range(3):
                 run_dir = get_run_dir(task_id, condition, rep)
                 has_run = (run_dir / "metadata.json").exists()
-                has_score = (RESULTS_DIR / "scores" / f"{task_id}_{condition}_rep{rep}.json").exists()
+                has_score = (
+                    RESULTS_DIR / "scores" / f"{task_id}_{condition}_rep{rep}.json"
+                ).exists()
 
                 run_status = "done" if has_run else "-"
                 score_status = "done" if has_score else "-"
@@ -282,7 +293,9 @@ def cmd_status(args):
                     if not meta.get("success"):
                         run_status = "FAIL"
 
-                print(f"  {task_id:<23} {condition:<12} {rep:>4} {run_status:>6} {score_status:>6}")
+                print(
+                    f"  {task_id:<23} {condition:<12} {rep:>4} {run_status:>6} {score_status:>6}"
+                )
 
 
 def main():
@@ -299,7 +312,9 @@ def main():
     p_run.add_argument("--task", default="T1_hierarchical", help="Task ID to run")
     p_run.add_argument("--reps", type=int, default=3, help="Replications per condition")
     p_run.add_argument("--force", action="store_true", help="Overwrite cached results")
-    p_run.add_argument("--resume", action="store_true", help="Re-run only missing/failed")
+    p_run.add_argument(
+        "--resume", action="store_true", help="Re-run only missing/failed"
+    )
 
     # score
     p_score = sub.add_parser("score", help="Score completed runs")

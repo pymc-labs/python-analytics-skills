@@ -63,59 +63,63 @@ tasks:
       - 'random_seed'
       - 'OrderedLogistic|OrderedProbit'
 
-  T3_model_comparison:
-    name: "Model comparison (LOO-CV)"
+  T3_stochastic_volatility:
+    name: "Stochastic volatility (S&P 500 returns)"
     prompt: |
-      I have data with a nonlinear pattern and possible outliers. Implement three
-      competing Bayesian models: (1) linear regression, (2) quadratic regression,
-      and (3) robust regression with Student-t errors. Compare them using LOO
-      cross-validation, check the Pareto-k diagnostics, and recommend which model
-      to use.
+      Model the time-varying volatility of daily S&P 500 log returns. Financial
+      returns exhibit "volatility clustering" — periods of high volatility tend
+      to persist. Build a stochastic volatility model with a latent log-volatility
+      process that evolves over time, and use a heavy-tailed likelihood to
+      capture the fat tails typical of financial return distributions.
 
-      The data is at: data/synthetic/regression_comparison.csv
-      Columns: x, y
+      The data is at: data/sp500_returns.csv
+      Columns: date, returns (daily log returns)
     data_files:
-      - synthetic/regression_comparison.csv
+      - sp500_returns.csv
     judge_rubric: |
       Score 0 if no PyMC model defined.
-      1 = multiple models defined (at least 2)
-      2 = + all three models fitted (linear, quadratic, robust)
-      3 = + LOO computed with log_likelihood present in InferenceData
-      4 = + Pareto-k diagnostics checked (plot or summary)
-      5 = + comparison table produced with clear decision rule for model selection
+      1 = any time series model for returns (AR, random walk, etc.)
+      2 = + latent volatility process using GaussianRandomWalk
+      3 = + Student-T or heavy-tailed likelihood with volatility-dependent scale
+      4 = + correct exp transform linking log-volatility to observation scale (e.g. exp(-2*vol))
+      5 = + reasonable priors on random walk step size and degrees of freedom
     best_practices_patterns:
       - 'coords'
       - 'dims'
       - 'nutpie'
       - 'random_seed'
-      - 'compute_log_likelihood|log_likelihood'
-      - 'az\.compare|az\.loo'
+      - 'GaussianRandomWalk'
+      - 'StudentT'
 
-  T4_gaussian_process:
-    name: "Gaussian process (Mauna Loa CO2)"
-    timeout: 900
+  T4_mixture:
+    name: "Gaussian mixture model (clustering)"
     prompt: |
-      Fit a Gaussian process model to the Mauna Loa CO2 dataset. The data shows
-      a clear long-term upward trend and an annual seasonal cycle. Model both
-      components and explain your kernel choices.
+      The file data/synthetic/mixture_data.csv contains 500 univariate observations
+      drawn from a mixture of Gaussian components. The number of components is
+      unknown but believed to be small (2-4). Build a Bayesian Gaussian mixture
+      model that estimates the number of active components, their means, standard
+      deviations, and mixing weights. Address the label-switching identifiability
+      problem that arises in mixture models.
 
-      The data is at: data/mauna_loa_co2.csv
-      Columns: date, co2
+      The data is at: data/synthetic/mixture_data.csv
+      Columns: x
     data_files:
-      - mauna_loa_co2.csv
+      - synthetic/mixture_data.csv
     judge_rubric: |
       Score 0 if no PyMC model defined.
-      1 = any GP model defined
-      2 = + separate trend and seasonal components (additive or multiplicative)
-      3 = + uses HSGP or HSGPPeriodic (scalable GP approximation)
-      4 = + appropriate kernel choices (e.g., Matern for trend, Periodic for season)
-      5 = + InverseGamma or well-justified lengthscale prior + reasonable m/c parameters
+      1 = any mixture model attempted
+      2 = + uses NormalMixture or Mixture with Normal components
+      3 = + Dirichlet prior on mixture weights
+      4 = + ordered transform on component means to prevent label switching
+      5 = + sensible initialization of ordered means (initval or testval)
     best_practices_patterns:
       - 'coords'
       - 'dims'
       - 'nutpie'
       - 'random_seed'
-      - 'HSGP|HSGPPeriodic'
+      - 'NormalMixture|Mixture'
+      - 'Dirichlet'
+      - 'ordered'
 
   T5_horseshoe:
     name: "Sparse variable selection (horseshoe)"

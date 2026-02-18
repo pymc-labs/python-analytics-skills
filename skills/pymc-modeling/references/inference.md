@@ -135,9 +135,10 @@ with model:
 
 #### When to Use PyMC NUTS Instead
 
-- Model uses features not yet supported by nutpie
-- Need specific PyMC sampling features (step methods, compound steps)
-- Debugging model specification issues
+- Debugging model specification issues (temporary only — switch back to nutpie after debugging)
+- Model requires compound step methods mixing NUTS with discrete samplers
+
+**Note**: nutpie supports all standard PyMC distributions and operations including `pytensor.scan`, `GaussianRandomWalk`, `AR`, `GARCH11`, `HSGP`, `Mixture`, `NormalMixture`, and `DensityDist`. "Complex model" is never a reason to avoid nutpie.
 
 ### NumPyro/JAX Backend
 
@@ -208,7 +209,7 @@ with model:
 
 ### PyMC NUTS
 
-The default PyMC sampler. Use as fallback when nutpie is unavailable.
+Legacy sampler. Only use for debugging or when nutpie and numpyro cannot be installed.
 
 ```python
 with model:
