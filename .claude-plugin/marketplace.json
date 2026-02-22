@@ -14,7 +14,8 @@
       "source": "./",
       "skills": [
         "./skills/pymc-modeling",
-        "./skills/marimo-notebook"
+        "./skills/marimo-notebook",
+        "./skills/pymc-testing"
       ]
     }
   ]
