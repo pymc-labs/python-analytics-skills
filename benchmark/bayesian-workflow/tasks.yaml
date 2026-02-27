@@ -1,0 +1,158 @@
+# Bayesian Workflow Skill Benchmark — Task Definitions
+# 5 tasks testing iterative model-building workflow.
+# Scoring focuses on process (iteration, prior checks, criticism) not just output.
+
+preamble: |
+  You are working in a directory that contains data files in data/.
+  Write Python scripts to build Bayesian models using PyMC. You may write
+  multiple model files (model.py, model_v2.py, etc.) as you iterate.
+  Save your final InferenceData to results.nc after sampling.
+  Available packages: PyMC, ArviZ, nutpie, NumPy, SciPy, matplotlib, polars.
+
+  IMPORTANT: Save results.nc as early as possible — after your first successful
+  sampling run. You can overwrite it later with an improved model.
+
+  Report the full sequence of models you tried, what each one revealed,
+  and why you made each change. Show your diagnostic checks.
+
+tasks:
+  W1_radon:
+    name: "Radon modeling (multi-level)"
+    prompt: |
+      You have radon measurements from homes across Minnesota counties in data/radon.csv.
+      Columns: county (85 counties), floor (0=basement, 1=first floor), log_radon
+      (log of radon level in pCi/L), log_uranium (county-level soil uranium, log scale).
+
+      Goal: Determine what factors influence indoor radon levels and how much
+      variation is explained by county-level vs household-level factors.
+
+      Specifically:
+      - Does the floor of measurement matter? By how much?
+      - How much do radon levels vary across counties?
+      - Does county-level uranium explain the between-county variation?
+
+      Build your analysis iteratively — start with a simple model, assess its fit,
+      and expand as needed. Report the sequence of models you tried and what each
+      one revealed.
+    data_files:
+      - radon.csv
+    reference_workflow: |
+      1. Complete pooling: single intercept + floor effect. Check prior predictive.
+      2. No pooling: county-specific intercepts. Compare to pooled — large variation?
+      3. Partial pooling: hierarchical intercepts by county (non-centered). Compare via LOO.
+      4. Add floor as county-varying slope (varying intercepts + slopes).
+      5. Add county-level uranium as group predictor. Check if it reduces between-county variance.
+      At each step: diagnose convergence, do posterior predictive checks, compare models.
+
+  W2_dose_response:
+    name: "Clinical trial dose-response"
+    prompt: |
+      A clinical trial tested 5 dose levels of a new drug (0, 2.5, 5, 10, 20 mg)
+      on 150 patients (30 per dose). The data is in data/dose_response.csv.
+      Columns: dose, response (1=responded, 0=did not respond).
+
+      Goal: Characterize the dose-response relationship and estimate the ED50
+      (the dose that produces a 50% response rate), with uncertainty.
+
+      Specifically:
+      - What is the shape of the dose-response curve?
+      - What is the ED50 and how uncertain is our estimate?
+      - Is a simple linear dose-response adequate, or does the data suggest
+        a more complex relationship (threshold, plateau)?
+
+      Build your analysis iteratively. Report the models you considered and
+      justify your final choice.
+    data_files:
+      - dose_response.csv
+    reference_workflow: |
+      1. Logistic regression with linear dose effect. Check prior predictive for reasonable dose-response.
+      2. 4-parameter log-logistic (Hill equation): ED50, Hill slope, lower/upper asymptote.
+         Prior predictive: does prior on ED50 cover plausible range?
+      3. Compare linear vs Hill via LOO or posterior predictive checks.
+      4. Report ED50 posterior with credible interval. Check posterior predictive calibration.
+
+  W3_changepoint:
+    name: "Time series with changepoint"
+    prompt: |
+      Daily measurements over 2 years are in data/timeseries.csv.
+      Columns: day (1-730), y (measurement).
+
+      Goal: Model the time series and identify any structural changes in
+      the underlying process. Quantify when changes occurred and what changed.
+
+      Specifically:
+      - Is there evidence of a structural break in the series?
+      - If so, when did it occur? Report uncertainty about the timing.
+      - What changed: the level, the trend, the variability, or some combination?
+
+      Start with a simple model for the full series, examine whether it captures
+      the data adequately, and expand if the diagnostics suggest a change.
+      Report the full sequence of models and what motivated each change.
+    data_files:
+      - timeseries.csv
+    reference_workflow: |
+      1. Simple linear trend for full series. Check residuals — are they homogeneous?
+      2. If residuals show a break: add a changepoint parameter (discrete or continuous).
+      3. Allow both level and slope to change at the changepoint.
+      4. Allow variance to change (heteroscedastic model).
+      5. Posterior on changepoint location — report uncertainty.
+      At each step: prior predictive on changepoint location, posterior predictive checks.
+
+  W4_confounding:
+    name: "Observational study with confounding"
+    prompt: |
+      An observational dataset is in data/observational.csv.
+      Columns: treatment (0/1), outcome (continuous), age, income, health_score,
+      education (4 levels), prior_condition (0/1).
+
+      Goal: Estimate the causal effect of the treatment on the outcome, being
+      explicit about your assumptions.
+
+      Specifically:
+      - What is the unadjusted treatment effect?
+      - How does the estimate change as you adjust for potential confounders?
+      - Which confounders matter most? Are any variables potentially colliders
+        (which should NOT be adjusted for)?
+      - How sensitive is your estimate to the set of confounders included?
+
+      Build up your analysis step by step, starting from a naive comparison
+      and progressively adjusting. Report what each adjustment reveals about
+      the treatment effect.
+    data_files:
+      - observational.csv
+    reference_workflow: |
+      1. Unadjusted: outcome ~ treatment. Report raw effect.
+      2. Add age + income (likely confounders). How does treatment effect change?
+      3. Add health_score. Does it change the estimate? (Could be mediator or confounder.)
+      4. Add education, prior_condition. Check sensitivity of treatment effect.
+      5. Compare models via LOO. Report how treatment effect varies across specifications.
+      Key: discuss which variables are confounders vs mediators vs colliders.
+
+  W5_sparse_prediction:
+    name: "Sparse prediction (many predictors)"
+    prompt: |
+      A prediction dataset is in data/sparse_regression.csv.
+      Columns: y (outcome), x1 through x50 (predictors). N=200 observations.
+      Many of the 50 predictors are likely irrelevant.
+
+      Goal: Build a predictive model that identifies which predictors matter
+      and provides well-calibrated predictions.
+
+      Specifically:
+      - Which predictors are genuinely associated with the outcome?
+      - How does a regularized model compare to a simpler model with
+        hand-selected predictors?
+      - How well does the model predict? Check via posterior predictive checks
+        or cross-validation.
+
+      Start with a baseline model (few predictors or simple priors), then
+      try regularization approaches. Compare models and report which predictors
+      survive shrinkage.
+    data_files:
+      - sparse_regression.csv
+    reference_workflow: |
+      1. Baseline: OLS-style with flat priors on first 5 predictors. Check prior predictive.
+      2. All 50 predictors with weakly informative priors. Check for overfitting via posterior predictive.
+      3. Horseshoe or Finnish horseshoe prior for sparsity. Which predictors have credible intervals excluding zero?
+      4. Compare sparse vs dense models via LOO.
+      5. Report which predictors survive shrinkage and posterior predictive calibration.
