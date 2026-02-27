@@ -45,7 +45,13 @@ print(f"Prior predictive range: [{prior_y.min():.1f}, {prior_y.max():.1f}]")
 print(f"Prior predictive mean: {prior_y.mean():.1f}, std: {prior_y.std():.1f}")
 ```
 
-Ask: does the generative model produce datasets that look like plausible datasets from this domain? Look for absurd implications (negative counts, probabilities outside [0,1], impossibly large effects). If the prior predictive range is unreasonable, adjust priors and re-check before fitting.
+Ask: does the generative model produce datasets that look like plausible datasets from this domain? Look for absurd implications (negative counts, probabilities outside [0,1], impossibly large effects).
+
+**If the prior predictive range is unreasonable, you MUST:**
+1. Identify which prior(s) cause the problem and explain why
+2. Adjust the prior(s) — report what you changed (e.g., "Narrowed intercept prior from Normal(0, 100) to Normal(0, 10)")
+3. Re-run `sample_prior_predictive` and confirm the range is now reasonable
+4. Only then proceed to sampling
 
 Prior predictive checks are especially important for complex models where interactions between priors on multiple parameters create unexpected behavior on the outcome scale.
 
@@ -88,6 +94,8 @@ The goal is not to "accept" or "reject" the model. The goal is to find *specific
 
 ### Step 5: Expand and Compare
 
+Label each model explicitly (e.g., "Model 1: complete pooling", "Model 2: no pooling", "Model 3: partial pooling") so the progression is clear. For straightforward models, you may combine prior predictive check + sampling + diagnostics in a single script rather than separate steps.
+
 Add ONE piece of complexity at a time. Fit the expanded model, repeat Steps 3-4, then compare:
 
 ```python
@@ -113,14 +121,28 @@ Fit the expanded model even when you believe the simpler one is sufficient. The 
 
 Report the sequence of models, not just the final one. The modeling journey IS the analysis.
 
-Structure your report as:
-1. What simple model you started with and what it revealed
-2. What prior predictive checks showed about your assumptions
-3. What posterior predictive checks revealed about model fit at each stage
-4. What expansions you tried, which helped, and which didn't
-5. How model comparison (LOO) informed your choices
-6. Final parameter estimates with uncertainty and interpretation
-7. Sensitivity: how conclusions change under reasonable alternative specifications
+After completing your analysis, print a structured summary covering:
+
+1. **Model progression table** — list each model by name, what it added, and its ELPD/LOO result
+2. **Prior predictive findings** — what your initial priors implied and any adjustments made
+3. **Posterior predictive findings** — specific misfits identified at each stage and how they motivated the next model
+4. **Model comparison results** — which expansions helped vs. didn't, with `d_loo` and `dse` values
+5. **Final estimates** — key parameter posteriors with means and 94% HDIs
+6. **Conclusions** — what the data support, what remains uncertain, and sensitivity to modeling choices
+
+Example format:
+```
+## Modeling Summary
+
+| Model | Description | ELPD_LOO | d_loo | dse |
+|-------|-------------|----------|-------|-----|
+| Model 1 | Complete pooling | -234.5 | 12.3 | 4.1 |
+| Model 2 | Partial pooling | -222.2 | 0.0 | 0.0 |
+
+### Prior predictive: ...
+### Posterior predictive: ...
+### Final estimates: ...
+```
 
 ## When to Simulate Fake Data First
 
