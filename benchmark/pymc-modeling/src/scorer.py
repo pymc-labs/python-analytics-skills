@@ -18,6 +18,9 @@ from pathlib import Path
 
 import yaml
 
+# Runs exceeding this wall time are treated as timeout failures
+TIMEOUT_CAP = 600  # seconds (must match runner.DEFAULT_TIMEOUT)
+
 logger = logging.getLogger(__name__)
 
 BENCHMARK_DIR = Path(__file__).parent.parent
@@ -710,6 +713,15 @@ def count_retries(run_dir: Path) -> tuple[int, dict]:
     return retries, details
 
 
+def _get_wall_time(run_dir: Path) -> float:
+    """Read wall_time from metadata.json, defaulting to 0."""
+    meta_path = run_dir / "metadata.json"
+    if not meta_path.exists():
+        return 0.0
+    meta = json.loads(meta_path.read_text())
+    return float(meta.get("wall_time", 0.0))
+
+
 def score_run(run_dir: Path, task_id: str, condition: str, rep: int) -> ScoreResult:
     """Score all criteria for a single benchmark run."""
     result = ScoreResult(task_id=task_id, condition=condition, rep=rep)
@@ -754,6 +766,22 @@ def score_run(run_dir: Path, task_id: str, condition: str, rep: int) -> ScoreRes
     )
     result.passed = passed
     result.details["pass_fail"] = pf_details
+
+    # Override for runs that exceeded the timeout cap — treat as failures
+    wall_time = _get_wall_time(run_dir)
+    if wall_time > TIMEOUT_CAP:
+        result.passed = False
+        result.efficiency = 0
+        result.compute_total()
+        result.details["timeout_override"] = {
+            "wall_time": wall_time,
+            "cap": TIMEOUT_CAP,
+            "reason": f"wall_time {wall_time:.0f}s exceeds {TIMEOUT_CAP}s cap",
+        }
+        logger.warning(
+            f"Timeout override: {task_id} {condition} rep{rep} "
+            f"wall_time={wall_time:.0f}s > {TIMEOUT_CAP}s"
+        )
 
     retries, retry_details = count_retries(run_dir)
     result.retries = retries

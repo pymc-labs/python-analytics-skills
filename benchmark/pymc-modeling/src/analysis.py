@@ -11,8 +11,11 @@ from pathlib import Path
 import polars as pl
 
 RESULTS_DIR = Path(__file__).parent.parent / "results"
+RUNS_DIR = RESULTS_DIR / "runs"
 SCORES_DIR = RESULTS_DIR / "scores"
 ANALYSIS_DIR = RESULTS_DIR / "analysis"
+
+TIMEOUT_CAP = 600  # seconds — winsorize wall_time at this value
 
 CRITERIA = [
     "model_produced", "convergence", "model_appropriateness",
@@ -28,10 +31,29 @@ def load_scores(scores_dir: Path | None = None) -> pl.DataFrame:
     records = []
     for f in sorted(scores_dir.glob("*.json")):
         data = json.loads(f.read_text())
+        task_id = data["task_id"]
+        condition = data["condition"]
+        rep = data["rep"]
+
+        # Load wall_time and cost from metadata
+        run_name = f"{task_id}_{condition}_rep{rep}"
+        meta_path = RUNS_DIR / run_name / "metadata.json"
+        wall_time = 0.0
+        cost_usd = 0.0
+        num_turns = 0
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+            wall_time = float(meta.get("wall_time", 0.0))
+            cost_usd = float(meta.get("cost_usd", 0.0))
+            num_turns = int(meta.get("num_turns", 0))
+
+        # Winsorize wall_time at the timeout cap
+        wall_time_winsorized = min(wall_time, TIMEOUT_CAP)
+
         records.append({
-            "task_id": data["task_id"],
-            "condition": data["condition"],
-            "rep": data["rep"],
+            "task_id": task_id,
+            "condition": condition,
+            "rep": rep,
             "model_produced": data["model_produced"],
             "convergence": data["convergence"],
             "model_appropriateness": data["model_appropriateness"],
@@ -41,6 +63,10 @@ def load_scores(scores_dir: Path | None = None) -> pl.DataFrame:
             "total": data["total"],
             "passed": data.get("passed", False),
             "retries": data.get("retries", 0),
+            "wall_time": wall_time,
+            "wall_time_winsorized": wall_time_winsorized,
+            "cost_usd": cost_usd,
+            "num_turns": num_turns,
         })
 
     if not records:
@@ -57,6 +83,10 @@ def load_scores(scores_dir: Path | None = None) -> pl.DataFrame:
             "total": pl.Int64,
             "passed": pl.Boolean,
             "retries": pl.Int64,
+            "wall_time": pl.Float64,
+            "wall_time_winsorized": pl.Float64,
+            "cost_usd": pl.Float64,
+            "num_turns": pl.Int64,
         })
 
     return pl.DataFrame(records)
@@ -269,6 +299,44 @@ def generate_report(
             f"| {row['task_id']} | {row['condition']} | "
             f"{row['mean_retries']:.1f} | {row['min_retries']} | {row['max_retries']} |"
         )
+
+    # Cost and Efficiency table (wall_time winsorized at TIMEOUT_CAP)
+    efficiency_stats = (
+        df.group_by(["task_id", "condition"])
+        .agg([
+            pl.col("num_turns").mean().alias("mean_turns"),
+            pl.col("wall_time_winsorized").mean().alias("mean_wall_time"),
+            pl.col("cost_usd").mean().alias("mean_cost"),
+        ])
+        .sort(["task_id", "condition"])
+    )
+
+    lines.extend([
+        "",
+        "## Cost and Efficiency",
+        "",
+        f"Wall times winsorized at {TIMEOUT_CAP}s timeout cap.",
+        "",
+        "| Task | Condition | Mean Turns | Mean Wall Time | Mean Cost |",
+        "|------|-----------|-----------|----------------|-----------|",
+    ])
+    for row in efficiency_stats.iter_rows(named=True):
+        lines.append(
+            f"| {row['task_id']} | {row['condition']} | "
+            f"{row['mean_turns']:.1f} | {row['mean_wall_time']:.0f}s | "
+            f"${row['mean_cost']:.2f} |"
+        )
+
+    # Overall averages
+    for cond in ["no_skill", "with_skill"]:
+        cond_df = df.filter(pl.col("condition") == cond)
+        if not cond_df.is_empty():
+            lines.append(
+                f"| **All tasks** | **{cond}** | "
+                f"**{cond_df.get_column('num_turns').mean():.1f}** | "
+                f"**{cond_df.get_column('wall_time_winsorized').mean():.0f}s** | "
+                f"**${cond_df.get_column('cost_usd').mean():.2f}** |"
+            )
 
     lines.extend(["", "## Effect Sizes (Cohen's d)", ""])
     lines.append("Positive d = skill helps. |d| interpretation: <0.2 negligible, 0.2-0.5 small, 0.5-0.8 medium, >0.8 large.")
