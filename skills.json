@@ -11,6 +11,11 @@
       "version": "1.0.0"
     },
     {
+      "name": "pymc-testing",
+      "description": "Testing PyMC models with pytest",
+      "version": "1.0.0"
+    },
+        {
       "name": "bayesian-workflow",
       "description": "Bayesian modeling workflow and iterative model-building strategy",
       "version": "1.0.0"
