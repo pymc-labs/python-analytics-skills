@@ -26,7 +26,7 @@ claude plugin marketplace add https://github.com/pymc-labs/python-analytics-skil
 ### Via npx
 
 ```bash
-npx skills add @pymc-labs/python-analytics-skills
+npx skills add pymc-labs/python-analytics-skills
 ```
 
 ### Manual Installation to Platform Skills Directories
