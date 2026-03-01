@@ -7,6 +7,7 @@ A plugin for Claude Code and other AI coding platforms providing [Agent Skills](
 | Skill | Description |
 |-------|-------------|
 | [pymc-modeling](skills/pymc-modeling/) | Bayesian statistical modeling with PyMC v5+. Covers model specification, MCMC inference (nutpie, NumPyro), ArviZ diagnostics, hierarchical models, GLMs, GPs, BART, time series, and more. |
+| [pymc-testing](skills/pymc-testing/) | Testing PyMC models with pytest. Covers mock sampling with `pymc.testing.mock_sample`, pytest fixtures, and the distinction between fast structure-only tests (mocking) and slow posterior inference tests. |
 | [marimo-notebook](skills/marimo-notebook/) | Reactive Python notebooks with marimo. Covers CLI, UI components, layout, SQL integration, caching, state management, and wigglystuff widgets. |
 
 ## Installation
@@ -83,6 +84,9 @@ python-analytics-skills/
 │   ├── pymc-modeling/
 │   │   ├── SKILL.md        # Main skill instructions
 │   │   └── references/     # 12 detailed reference docs
+│   ├── pymc-testing/
+│   │   ├── SKILL.md        # Main skill instructions
+│   │   └── references/
 │   └── marimo-notebook/
 │       ├── SKILL.md        # Main skill instructions
 │       ├── references/     # 4 reference docs
