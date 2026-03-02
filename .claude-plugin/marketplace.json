@@ -15,7 +15,6 @@
       "skills": [
         "./skills/pymc-modeling",
         "./skills/marimo-notebook",
-        "./skills/bayesian-workflow",
         "./skills/pymc-testing"
       ]
     }

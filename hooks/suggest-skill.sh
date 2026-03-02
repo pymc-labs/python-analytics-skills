@@ -17,32 +17,6 @@ prompt_lower=$(echo "$prompt" | tr '[:upper:]' '[:lower:]')
 
 suggest_pymc=false
 suggest_marimo=false
-suggest_workflow=false
-
-# Bayesian workflow keywords (check BEFORE single-keyword pymc match)
-# Compound: both "bayesian" and "workflow" present
-if echo "$prompt_lower" | grep -qE "bayesian" && echo "$prompt_lower" | grep -qE "workflow"; then
-  suggest_workflow=true
-fi
-
-# Single-phrase triggers for workflow
-workflow_keywords=(
-  "iterative modeling"
-  "model building strategy"
-  "how should i model"
-  "start simple"
-  "model expansion"
-  "simulation.based calibration"
-  "fake.data simulation"
-  "prior predictive simulation"
-)
-
-for kw in "${workflow_keywords[@]}"; do
-  if echo "$prompt_lower" | grep -qE "$kw"; then
-    suggest_workflow=true
-    break
-  fi
-done
 
 # PyMC keywords
 pymc_keywords=(
@@ -87,9 +61,6 @@ if [ "$suggest_pymc" = true ]; then
 fi
 if [ "$suggest_marimo" = true ]; then
   messages+=("Consider using the **marimo-notebook** skill for reactive notebook guidance.")
-fi
-if [ "$suggest_workflow" = true ]; then
-  messages+=("Consider using the **bayesian-workflow** skill for iterative model-building strategy.")
 fi
 
 if [ ${#messages[@]} -gt 0 ]; then

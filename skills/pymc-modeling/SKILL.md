@@ -19,7 +19,9 @@ This skill bridges that gap. It encodes modern best practices like using nutpie 
 
 Without this skill, Claude might suggest outdated defaults like the slow default NUTS sampler, miss critical diagnostics such as ESS and r_hat checks, or recommend inefficient parameterizations that lead to divergences. With it, you get concise, battle-tested patterns that actually work in practice.
 
-**Modeling strategy**: For guidance on iterative model building — starting simple, fake-data simulation, prior predictive criticism, model expansion, and combining information — see the `bayesian-workflow` skill.
+**Modeling strategy**: Build models iteratively — start simple, check prior
+predictions, fit and diagnose, check posterior predictions, expand one piece at
+a time. See [references/workflow.md](references/workflow.md) for the full workflow.
 
 **Notebook preference**: Use marimo for interactive modeling unless the project already uses Jupyter.
 
@@ -212,6 +214,9 @@ print(f"Prior predictive range: [{prior_y.min():.1f}, {prior_y.max():.1f}]")
 
 **Warning signs**: Prior predictive covers implausible values (negative counts, probabilities > 1) or is extremely wide/narrow.
 
+**Rule**: Run prior predictive checks before `pm.sample()` on any new model.
+If the range is unreasonable, adjust priors and re-check before proceeding.
+
 ### Posterior Predictive (After Fitting)
 
 ```python
@@ -323,6 +328,13 @@ az.plot_compare(comparison)
 **Decision rule**: If `d_loo < 2*dse`, models are effectively equivalent.
 
 See [references/arviz.md](references/arviz.md) for detailed model comparison workflow.
+
+### Iterative Model Building
+
+Build complexity incrementally: fit the simplest plausible model first, diagnose
+it, check posterior predictions, then add ONE piece of complexity at a time.
+Compare each expansion via LOO. If `d_loo < 2*dse`, prefer the simpler model.
+See [references/workflow.md](references/workflow.md) for the full iterative workflow.
 
 ## Saving and Loading Results
 
