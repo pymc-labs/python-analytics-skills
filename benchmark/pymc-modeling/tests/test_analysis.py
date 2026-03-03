@@ -34,8 +34,8 @@ def _create_score_files(scores_dir: Path, task_id: str, reps: int = 5):
                 "convergence": 3 + bonus,
                 "model_appropriateness": 2 + bonus + jitter,
                 "best_practices": 2 + bonus,
-                "thrashing": 3 + bonus,
-                "efficiency": 3 + bonus + jitter,
+                "workflow": 3 + bonus,
+                "parameter_recovery": 3 + bonus + jitter,
                 "total": 16 + 6 * bonus + 3 * jitter,
                 "passed": condition == "with_skill",
                 "retries": 3 - bonus * 2,
@@ -123,7 +123,7 @@ class TestLoadScoresNewFields:
         assert ns.get_column("passed").sum() == 0
 
     def test_backward_compat_defaults(self, tmp_path):
-        """Old score JSONs without passed/retries get defaults."""
+        """Old score JSONs without passed/retries/workflow/parameter_recovery get defaults."""
         scores_dir = tmp_path / "scores"
         scores_dir.mkdir(parents=True)
         old_score = {
@@ -134,9 +134,7 @@ class TestLoadScoresNewFields:
             "convergence": 3,
             "model_appropriateness": 2,
             "best_practices": 2,
-            "thrashing": 3,
-            "efficiency": 3,
-            "total": 16,
+            "total": 10,
         }
         (scores_dir / "T1_hierarchical_no_skill_rep0.json").write_text(
             json.dumps(old_score)
@@ -144,6 +142,8 @@ class TestLoadScoresNewFields:
         df = load_scores(scores_dir)
         assert df.get_column("passed")[0] is False
         assert df.get_column("retries")[0] == 0
+        assert df.get_column("workflow")[0] == 0
+        assert df.get_column("parameter_recovery")[0] == 0
 
 
 class TestSummaryTable:

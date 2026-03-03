@@ -40,7 +40,7 @@ comparison = az.compare({
 print(comparison[["rank", "elpd_loo", "elpd_diff", "se_diff", "weight"]])
 ```
 
-**Decision rule**: If `elpd_diff < 2 * se_diff`, models are effectively equivalent — prefer the simpler one.
+**Decision rule**: If two models have similar stacking weights, they are effectively equivalent.
 
 Fit the expanded model even when you believe the simpler one is sufficient. The comparison itself is informative:
 - If the expansion doesn't improve fit, you've demonstrated the simpler model is adequate
@@ -54,10 +54,10 @@ Report the sequence of models, not just the final one. The modeling journey IS t
 Summarize with a model progression table:
 
 ```
-| Model | Description | ELPD_LOO | elpd_diff | se_diff |
-|-------|-------------|----------|-----------|---------|
-| Model 1 | Complete pooling | -234.5 | 12.3 | 4.1 |
-| Model 2 | Partial pooling | -222.2 | 0.0 | 0.0 |
+| Model | Description | ELPD_LOO | elpd_diff | weight |
+|-------|-------------|----------|-----------|--------|
+| Model 2 | Partial pooling | -222.2 | 0.0 | 0.91 |
+| Model 1 | Complete pooling | -234.5 | -12.3 | 0.09 |
 ```
 
 Include: prior predictive findings, posterior predictive misfits that motivated each expansion, model comparison results, final parameter estimates with 94% HDIs, and conclusions about what the data support.

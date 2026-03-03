@@ -340,11 +340,11 @@ comparison = az.compare({
     "model_b": idata_b,
 }, ic="loo")
 
-print(comparison[["rank", "elpd_loo", "elpd_diff", "weight", "se_diff"]])
+print(comparison[["rank", "elpd_loo", "elpd_diff", "weight"]])
 az.plot_compare(comparison)
 ```
 
-**Decision rule**: If `elpd_diff < 2*se_diff`, models are effectively equivalent.
+**Decision rule**: If two models have similar stacking weights, they are effectively equivalent.
 
 See [references/arviz.md](references/arviz.md) for detailed model comparison workflow.
 
@@ -352,7 +352,7 @@ See [references/arviz.md](references/arviz.md) for detailed model comparison wor
 
 Build complexity incrementally: fit the simplest plausible model first, diagnose
 it, check posterior predictions, then add ONE piece of complexity at a time.
-Compare each expansion via LOO. If `elpd_diff < 2*se_diff`, prefer the simpler model.
+Compare each expansion via LOO. If stacking weights are similar, the models are effectively equivalent.
 See [references/workflow.md](references/workflow.md) for the full iterative workflow.
 
 ## Saving and Loading Results
