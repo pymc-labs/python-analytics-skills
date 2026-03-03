@@ -17,7 +17,7 @@ from src.analysis import (
 )
 
 
-def _create_score_files(scores_dir: Path, task_id: str, reps: int = 3):
+def _create_score_files(scores_dir: Path, task_id: str, reps: int = 5):
     """Helper: create synthetic score files for testing."""
     scores_dir.mkdir(parents=True, exist_ok=True)
 
@@ -34,8 +34,8 @@ def _create_score_files(scores_dir: Path, task_id: str, reps: int = 3):
                 "convergence": 3 + bonus,
                 "model_appropriateness": 2 + bonus + jitter,
                 "best_practices": 2 + bonus,
-                "thrashing": 3 + bonus,
-                "efficiency": 3 + bonus + jitter,
+                "workflow": 3 + bonus,
+                "parameter_recovery": 3 + bonus + jitter,
                 "total": 16 + 6 * bonus + 3 * jitter,
                 "passed": condition == "with_skill",
                 "retries": 3 - bonus * 2,
@@ -87,7 +87,7 @@ class TestLoadScores:
         scores_dir = tmp_path / "scores"
         _create_score_files(scores_dir, "T1_hierarchical")
         df = load_scores(scores_dir)
-        assert len(df) == 6  # 2 conditions * 3 reps
+        assert len(df) == 10  # 2 conditions * 5 reps
         assert "task_id" in df.columns
         assert "total" in df.columns
 
@@ -119,11 +119,11 @@ class TestLoadScoresNewFields:
         # with_skill runs should pass, no_skill should not
         ws = df.filter(pl.col("condition") == "with_skill")
         ns = df.filter(pl.col("condition") == "no_skill")
-        assert ws.get_column("passed").sum() == 3
+        assert ws.get_column("passed").sum() == 5
         assert ns.get_column("passed").sum() == 0
 
     def test_backward_compat_defaults(self, tmp_path):
-        """Old score JSONs without passed/retries get defaults."""
+        """Old score JSONs without passed/retries/workflow/parameter_recovery get defaults."""
         scores_dir = tmp_path / "scores"
         scores_dir.mkdir(parents=True)
         old_score = {
@@ -134,9 +134,7 @@ class TestLoadScoresNewFields:
             "convergence": 3,
             "model_appropriateness": 2,
             "best_practices": 2,
-            "thrashing": 3,
-            "efficiency": 3,
-            "total": 16,
+            "total": 10,
         }
         (scores_dir / "T1_hierarchical_no_skill_rep0.json").write_text(
             json.dumps(old_score)
@@ -144,6 +142,8 @@ class TestLoadScoresNewFields:
         df = load_scores(scores_dir)
         assert df.get_column("passed")[0] is False
         assert df.get_column("retries")[0] == 0
+        assert df.get_column("workflow")[0] == 0
+        assert df.get_column("parameter_recovery")[0] == 0
 
 
 class TestSummaryTable:

@@ -10,16 +10,15 @@ from pathlib import Path
 
 import polars as pl
 
-RESULTS_DIR = Path(__file__).parent.parent / "results"
+from src.runner import DEFAULT_TIMEOUT, RESULTS_DIR
+
 RUNS_DIR = RESULTS_DIR / "runs"
 SCORES_DIR = RESULTS_DIR / "scores"
 ANALYSIS_DIR = RESULTS_DIR / "analysis"
 
-TIMEOUT_CAP = 600  # seconds — winsorize wall_time at this value
-
 CRITERIA = [
     "model_produced", "convergence", "model_appropriateness",
-    "best_practices", "thrashing", "efficiency", "total",
+    "best_practices", "workflow", "parameter_recovery", "total",
 ]
 
 
@@ -48,7 +47,7 @@ def load_scores(scores_dir: Path | None = None) -> pl.DataFrame:
             num_turns = int(meta.get("num_turns", 0))
 
         # Winsorize wall_time at the timeout cap
-        wall_time_winsorized = min(wall_time, TIMEOUT_CAP)
+        wall_time_winsorized = min(wall_time, DEFAULT_TIMEOUT)
 
         records.append({
             "task_id": task_id,
@@ -58,8 +57,8 @@ def load_scores(scores_dir: Path | None = None) -> pl.DataFrame:
             "convergence": data["convergence"],
             "model_appropriateness": data["model_appropriateness"],
             "best_practices": data["best_practices"],
-            "thrashing": data.get("thrashing", 0),
-            "efficiency": data.get("efficiency", 0),
+            "workflow": data.get("workflow", 0),
+            "parameter_recovery": data.get("parameter_recovery", 0),
             "total": data["total"],
             "passed": data.get("passed", False),
             "retries": data.get("retries", 0),
@@ -78,8 +77,8 @@ def load_scores(scores_dir: Path | None = None) -> pl.DataFrame:
             "convergence": pl.Int64,
             "model_appropriateness": pl.Int64,
             "best_practices": pl.Int64,
-            "thrashing": pl.Int64,
-            "efficiency": pl.Int64,
+            "workflow": pl.Int64,
+            "parameter_recovery": pl.Int64,
             "total": pl.Int64,
             "passed": pl.Boolean,
             "retries": pl.Int64,
@@ -184,8 +183,8 @@ def summary_table(df: pl.DataFrame) -> pl.DataFrame:
             pl.col("convergence").mean().alias("convergence_mean"),
             pl.col("model_appropriateness").mean().alias("appropriateness_mean"),
             pl.col("best_practices").mean().alias("best_practices_mean"),
-            pl.col("thrashing").mean().alias("thrashing_mean"),
-            pl.col("efficiency").mean().alias("efficiency_mean"),
+            pl.col("workflow").mean().alias("workflow_mean"),
+            pl.col("parameter_recovery").mean().alias("parameter_recovery_mean"),
             pl.col("total").mean().alias("total_mean"),
             pl.col("total").count().alias("n"),
         ])
@@ -250,15 +249,15 @@ def generate_report(
     ]
 
     # Summary table as markdown
-    lines.append("| Task | Condition | N | Produced | Convergence | Appropriateness | Best Practices | Thrashing | Efficiency | Total |")
-    lines.append("|------|-----------|---|----------|-------------|-----------------|----------------|-----------|------------|-------|")
+    lines.append("| Task | Condition | N | Produced | Convergence | Appropriateness | Best Practices | Workflow | Recovery | Total |")
+    lines.append("|------|-----------|---|----------|-------------|-----------------|----------------|----------|----------|-------|")
 
     for row in summary.iter_rows(named=True):
         lines.append(
             f"| {row['task_id']} | {row['condition']} | {row['n']} | "
             f"{row['model_produced_mean']:.1f} | {row['convergence_mean']:.1f} | "
             f"{row['appropriateness_mean']:.1f} | {row['best_practices_mean']:.1f} | "
-            f"{row['thrashing_mean']:.1f} | {row['efficiency_mean']:.1f} | "
+            f"{row['workflow_mean']:.1f} | {row['parameter_recovery_mean']:.1f} | "
             f"{row['total_mean']:.1f} |"
         )
 
@@ -300,7 +299,7 @@ def generate_report(
             f"{row['mean_retries']:.1f} | {row['min_retries']} | {row['max_retries']} |"
         )
 
-    # Cost and Efficiency table (wall_time winsorized at TIMEOUT_CAP)
+    # Cost and Efficiency table (wall_time winsorized at DEFAULT_TIMEOUT)
     efficiency_stats = (
         df.group_by(["task_id", "condition"])
         .agg([
@@ -315,7 +314,7 @@ def generate_report(
         "",
         "## Cost and Efficiency",
         "",
-        f"Wall times winsorized at {TIMEOUT_CAP}s timeout cap.",
+        f"Wall times winsorized at {DEFAULT_TIMEOUT}s timeout cap.",
         "",
         "| Task | Condition | Mean Turns | Mean Wall Time | Mean Cost |",
         "|------|-----------|-----------|----------------|-----------|",
@@ -327,9 +326,12 @@ def generate_report(
             f"${row['mean_cost']:.2f} |"
         )
 
+    # Cache condition slices for reuse in Overall Effect section below
+    no_skill_df = df.filter(pl.col("condition") == "no_skill")
+    with_skill_df = df.filter(pl.col("condition") == "with_skill")
+
     # Overall averages
-    for cond in ["no_skill", "with_skill"]:
-        cond_df = df.filter(pl.col("condition") == cond)
+    for cond, cond_df in [("no_skill", no_skill_df), ("with_skill", with_skill_df)]:
         if not cond_df.is_empty():
             lines.append(
                 f"| **All tasks** | **{cond}** | "
@@ -357,8 +359,8 @@ def generate_report(
 
     # Overall effect
     lines.extend(["", "## Overall Effect", ""])
-    no_skill_total = df.filter(pl.col("condition") == "no_skill").get_column("total").to_list()
-    with_skill_total = df.filter(pl.col("condition") == "with_skill").get_column("total").to_list()
+    no_skill_total = no_skill_df.get_column("total").to_list()
+    with_skill_total = with_skill_df.get_column("total").to_list()
 
     if no_skill_total and with_skill_total:
         overall_d = cohens_d(
@@ -367,13 +369,13 @@ def generate_report(
         )
         ns_mean = sum(no_skill_total) / len(no_skill_total)
         ws_mean = sum(with_skill_total) / len(with_skill_total)
-        lines.append(f"- no_skill mean total: {ns_mean:.1f}/30")
-        lines.append(f"- with_skill mean total: {ws_mean:.1f}/30")
+        lines.append(f"- no_skill mean total: {ns_mean:.1f}")
+        lines.append(f"- with_skill mean total: {ws_mean:.1f}")
         lines.append(f"- Cohen's d: {overall_d:.2f} ({_interpret_d(overall_d)})")
 
         # Pass rates
-        no_skill_passed = df.filter(pl.col("condition") == "no_skill").get_column("passed")
-        with_skill_passed = df.filter(pl.col("condition") == "with_skill").get_column("passed")
+        no_skill_passed = no_skill_df.get_column("passed")
+        with_skill_passed = with_skill_df.get_column("passed")
         ns_pass_n = int(no_skill_passed.sum())
         ns_pass_total = len(no_skill_passed)
         ws_pass_n = int(with_skill_passed.sum())
@@ -384,8 +386,8 @@ def generate_report(
         lines.append(f"- with_skill pass rate: {ws_pass_pct:.0f}% ({ws_pass_n}/{ws_pass_total})")
 
         # Retries
-        no_skill_retries = df.filter(pl.col("condition") == "no_skill").get_column("retries").to_list()
-        with_skill_retries = df.filter(pl.col("condition") == "with_skill").get_column("retries").to_list()
+        no_skill_retries = no_skill_df.get_column("retries").to_list()
+        with_skill_retries = with_skill_df.get_column("retries").to_list()
         ns_retry_mean = sum(no_skill_retries) / len(no_skill_retries) if no_skill_retries else 0
         ws_retry_mean = sum(with_skill_retries) / len(with_skill_retries) if with_skill_retries else 0
         lines.append(f"- no_skill mean retries: {ns_retry_mean:.1f}")

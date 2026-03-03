@@ -17,6 +17,7 @@ prompt_lower=$(echo "$prompt" | tr '[:upper:]' '[:lower:]')
 
 suggest_pymc=false
 suggest_marimo=false
+suggest_pymc_testing=false
 
 # PyMC keywords
 pymc_keywords=(
@@ -34,6 +35,20 @@ pymc_keywords=(
 for kw in "${pymc_keywords[@]}"; do
   if echo "$prompt_lower" | grep -qE "$kw"; then
     suggest_pymc=true
+    break
+  fi
+done
+
+# PyMC testing keywords
+pymc_testing_keywords=(
+  "testing pymc" "test.*pymc" "pymc.*test" "mock.sample"
+  "mock_sample" "pytest.*pymc" "pymc.*pytest" "unit test.*model"
+  "test fixture.*pymc" "ci.*pymc" "pymc.*ci"
+)
+
+for kw in "${pymc_testing_keywords[@]}"; do
+  if echo "$prompt_lower" | grep -qE "$kw"; then
+    suggest_pymc_testing=true
     break
   fi
 done
@@ -61,6 +76,9 @@ if [ "$suggest_pymc" = true ]; then
 fi
 if [ "$suggest_marimo" = true ]; then
   messages+=("Consider using the **marimo-notebook** skill for reactive notebook guidance.")
+fi
+if [ "$suggest_pymc_testing" = true ]; then
+  messages+=("Consider using the **pymc-testing** skill for PyMC model testing guidance.")
 fi
 
 if [ ${#messages[@]} -gt 0 ]; then

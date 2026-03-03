@@ -19,6 +19,10 @@ This skill bridges that gap. It encodes modern best practices like using nutpie 
 
 Without this skill, Claude might suggest outdated defaults like the slow default NUTS sampler, miss critical diagnostics such as ESS and r_hat checks, or recommend inefficient parameterizations that lead to divergences. With it, you get concise, battle-tested patterns that actually work in practice.
 
+**Modeling strategy**: Build models iteratively — start simple, check prior
+predictions, fit and diagnose, check posterior predictions, expand one piece at
+a time. See [references/workflow.md](references/workflow.md) for the full workflow.
+
 **Notebook preference**: Use marimo for interactive modeling unless the project already uses Jupyter.
 
 ## Model Specification
@@ -74,9 +78,9 @@ alpha = pm.Normal("alpha", mu_alpha, sigma_alpha, dims="group")
 
 ## Inference
 
-### Default Sampling (nutpie — always use)
+### Default Sampling (nutpie preferred)
 
-**Always** use nutpie or numpyro for sampling. Never use PyMC's default NUTS — it is 2-5x slower. nutpie is Rust-based and supports all standard PyMC models including time series, GPs, mixtures, and custom likelihoods:
+Prefer nutpie for sampling — it is Rust-based and typically 2-5x faster than PyMC's default NUTS. It supports most standard PyMC models including time series, GPs, mixtures, and custom likelihoods:
 
 ```python
 with model:
@@ -94,9 +98,20 @@ idata.to_netcdf("results.nc")  # Save immediately after sampling
 pm.compute_log_likelihood(idata, model=model)
 ```
 
+### When to Use PyMC's Default NUTS Instead
+
+**Model correctness takes precedence over sampler speed.** nutpie's numba backend cannot handle models with discrete parameters or certain transforms (e.g., the `ordered` transform used with `OrderedLogistic`/`OrderedProbit`). If your model uses discrete variables or these transforms, omit `nuts_sampler="nutpie"` and use PyMC's default NUTS:
+
+```python
+# Models with discrete params or ordered transforms: use default NUTS
+idata = pm.sample(draws=1000, tune=1000, chains=4, random_seed=42)
+```
+
+Do not work around sampler incompatibilities by changing the model specification. Use the correct statistical model and let the sampler adapt.
+
 ### If nutpie Is Not Installed
 
-Always use `nuts_sampler="nutpie"` or `nuts_sampler="numpyro"`. If neither is installed, install before sampling:
+Use `nuts_sampler="nutpie"` or `nuts_sampler="numpyro"` when the model supports it. If neither is installed, install before sampling:
 
 ```python
 import subprocess, sys
@@ -105,8 +120,6 @@ try:
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "nutpie"])
 ```
-
-Do not fall back to PyMC's default NUTS sampler — it is 2-5x slower and should only be used temporarily for debugging model specification issues.
 
 ### Alternative MCMC Backends
 
@@ -120,6 +133,12 @@ For fast (but inexact) posterior approximations:
 - **Pathfinder**: Quasi-Newton optimization for initialization or screening
 
 ## Diagnostics and ArviZ Workflow
+
+**Minimum workflow checklist** — every model script should include:
+1. Prior predictive check (`pm.sample_prior_predictive`)
+2. Save results immediately after sampling (`idata.to_netcdf(...)`)
+3. Divergence count + r_hat + ESS check
+4. Posterior predictive check (`pm.sample_posterior_predictive`)
 
 Follow this systematic workflow after every sampling run:
 
@@ -209,6 +228,9 @@ print(f"Prior predictive range: [{prior_y.min():.1f}, {prior_y.max():.1f}]")
 ```
 
 **Warning signs**: Prior predictive covers implausible values (negative counts, probabilities > 1) or is extremely wide/narrow.
+
+**Rule**: Run prior predictive checks before `pm.sample()` on any new model.
+If the range is unreasonable, adjust priors and re-check before proceeding.
 
 ### Posterior Predictive (After Fitting)
 
@@ -309,18 +331,29 @@ az.plot_khat(idata)
 ### Comparing Models
 
 ```python
+# If using nutpie, compute log-likelihood first (nutpie doesn't store it automatically)
+pm.compute_log_likelihood(idata_a, model=model_a)
+pm.compute_log_likelihood(idata_b, model=model_b)
+
 comparison = az.compare({
     "model_a": idata_a,
     "model_b": idata_b,
 }, ic="loo")
 
-print(comparison[["rank", "elpd_loo", "d_loo", "weight", "dse"]])
+print(comparison[["rank", "elpd_loo", "elpd_diff", "weight"]])
 az.plot_compare(comparison)
 ```
 
-**Decision rule**: If `d_loo < 2*dse`, models are effectively equivalent.
+**Decision rule**: If two models have similar stacking weights, they are effectively equivalent.
 
 See [references/arviz.md](references/arviz.md) for detailed model comparison workflow.
+
+### Iterative Model Building
+
+Build complexity incrementally: fit the simplest plausible model first, diagnose
+it, check posterior predictions, then add ONE piece of complexity at a time.
+Compare each expansion via LOO. If stacking weights are similar, the models are effectively equivalent.
+See [references/workflow.md](references/workflow.md) for the full iterative workflow.
 
 ## Saving and Loading Results
 
@@ -508,12 +541,15 @@ with pm.Model(coords=coords) as gmm:
 
     # Component parameters (with ordering to avoid label switching)
     mu = pm.Normal("mu", mu=0, sigma=10, dims="component",
-                   transform=pm.distributions.transforms.ordered)
+                   transform=pm.distributions.transforms.ordered,
+                   initval=np.linspace(y_obs.min(), y_obs.max(), K))
     sigma = pm.HalfNormal("sigma", sigma=2, dims="component")
 
     # Mixture likelihood
     y = pm.NormalMixture("y", w=w, mu=mu, sigma=sigma, observed=y_obs)
 ```
+
+**Important**: Mixture models often need `target_accept=0.9` or higher to avoid divergences from the multimodal geometry. Always provide `initval` on ordered means — without it, components can start overlapping and the sampler struggles to separate them.
 
 See [references/mixtures.md](references/mixtures.md) for:
 - Finite mixture models and mixture of regressions

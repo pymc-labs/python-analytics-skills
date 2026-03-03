@@ -1,5 +1,5 @@
 # PyMC Skill Benchmark — Task Definitions
-# 5 tasks targeting specific skill coverage areas.
+# 5 tasks targeting specific PyMC skill coverage areas.
 # No basic models — every task tests something the skill explicitly teaches.
 
 preamble: |

@@ -5,32 +5,33 @@ Criteria:
 2. Convergence (0-5): automated, reads r_hat/ESS/divergences from .nc
 3. Model appropriateness (0-5): LLM judge (Haiku) with task-specific rubric
 4. Best practices (0-5): regex on model.py for coords/dims, nutpie, etc.
-5. Thrashing (0-5): how many rewrite cycles before success (fewer = better)
-6. Efficiency (0-5): how many turns Claude needed (fewer = better)
+5. Workflow (0-5): evidence of Bayesian workflow steps in model.py
+6. Parameter recovery (0-5): posterior covers known ground truth or plausible ranges
 """
 
 import json
 import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+import arviz as az
+import numpy as np
 
-# Runs exceeding this wall time are treated as timeout failures
-TIMEOUT_CAP = 600  # seconds (must match runner.DEFAULT_TIMEOUT)
+from src.runner import (
+    DEFAULT_TIMEOUT,
+    RESULTS_DIR,
+    RUNS_DIR,
+    load_tasks,
+)
 
 logger = logging.getLogger(__name__)
 
-BENCHMARK_DIR = Path(__file__).parent.parent
-RESULTS_DIR = BENCHMARK_DIR / "results"
-RUNS_DIR = RESULTS_DIR / "runs"
-TASKS_PATH = Path(__file__).parent.parent / "tasks.yaml"
-
 # LLM judge settings
 JUDGE_MODEL = "haiku"
-JUDGE_BUDGET = "0.05"
+JUDGE_BUDGET = "0.50"
 JUDGE_TIMEOUT = 60
 
 
@@ -44,8 +45,8 @@ class ScoreResult:
     convergence: int = 0
     model_appropriateness: int = 0
     best_practices: int = 0
-    thrashing: int = 0
-    efficiency: int = 0
+    workflow: int = 0
+    parameter_recovery: int = 0
     total: int = 0
     passed: bool = False
     retries: int = 0
@@ -57,25 +58,12 @@ class ScoreResult:
             + self.convergence
             + self.model_appropriateness
             + self.best_practices
-            + self.thrashing
-            + self.efficiency
+            + self.workflow
+            + self.parameter_recovery
         )
 
 
-def _sampling_completed(run_dir: Path) -> bool:
-    """Check if MCMC sampling completed (results.nc has posterior)."""
-    nc_path = run_dir / "results.nc"
-    if not nc_path.exists():
-        return False
-    try:
-        import arviz as az
-        idata = az.from_netcdf(str(nc_path))
-        return hasattr(idata, "posterior") and idata.posterior is not None
-    except Exception:
-        return False
-
-
-def score_model_produced(run_dir: Path) -> tuple[int, dict]:
+def score_model_produced(run_dir: Path, idata=None) -> tuple[int, dict]:
     """Score criterion 1: Model produced (0-5).
 
     0 = no model.py or results.nc
@@ -100,8 +88,8 @@ def score_model_produced(run_dir: Path) -> tuple[int, dict]:
         return 1, details
 
     try:
-        import arviz as az
-        idata = az.from_netcdf(str(nc_path))
+        if idata is None:
+            idata = az.from_netcdf(str(nc_path))
     except Exception as e:
         details["reason"] = f"results.nc load error: {e}"
         return 2, details
@@ -134,7 +122,7 @@ def score_model_produced(run_dir: Path) -> tuple[int, dict]:
     return 4, details
 
 
-def score_convergence(run_dir: Path) -> tuple[int, dict]:
+def score_convergence(run_dir: Path, idata=None) -> tuple[int, dict]:
     """Score criterion 2: Convergence (0-5).
 
     0 = no results.nc or can't compute diagnostics
@@ -151,10 +139,8 @@ def score_convergence(run_dir: Path) -> tuple[int, dict]:
         return 0, details
 
     try:
-        import arviz as az
-        import numpy as np
-
-        idata = az.from_netcdf(str(nc_path))
+        if idata is None:
+            idata = az.from_netcdf(str(nc_path))
 
         if not hasattr(idata, "posterior") or idata.posterior is None:
             details["reason"] = "no posterior group"
@@ -259,9 +245,7 @@ def score_best_practices(run_dir: Path, task_id: str) -> tuple[int, dict]:
     code = model_py.read_text()
     details["code_lines"] = len(code.splitlines())
 
-    with open(TASKS_PATH) as f:
-        config = yaml.safe_load(f)
-
+    config = load_tasks()
     patterns = config["tasks"][task_id].get("best_practices_patterns", [])
     matches = {}
     score = 0
@@ -335,9 +319,7 @@ def score_model_appropriateness_llm(
 
     code = model_py.read_text()
 
-    with open(TASKS_PATH) as f:
-        config = yaml.safe_load(f)
-
+    config = load_tasks()
     task = config["tasks"][task_id]
     rubric = task["judge_rubric"]
     task_name = task["name"]
@@ -361,6 +343,10 @@ Code:
 ```"""
 
     try:
+        # Strip CLAUDECODE to allow nested claude --print calls.
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+
         proc = subprocess.run(
             [
                 "claude",
@@ -375,6 +361,7 @@ Code:
             capture_output=True,
             text=True,
             timeout=JUDGE_TIMEOUT,
+            env=env,
         )
 
         response = proc.stdout.strip()
@@ -447,6 +434,415 @@ def _score_appropriateness_regex(
     return min(score, 5), details
 
 
+def score_workflow(run_dir: Path) -> tuple[int, dict]:
+    """Score criterion 5: Bayesian workflow evidence (0-5).
+
+    Checks model.py for evidence of robust Bayesian workflow practices.
+    Each practice detected earns 1 point. No penalty for iteration count.
+
+    +1 = prior predictive check (sample_prior_predictive)
+    +1 = convergence diagnostics examined (az.summary, az.rhat, diverging check)
+    +1 = posterior predictive check (sample_posterior_predictive)
+    +1 = model comparison or sensitivity analysis (az.compare, az.loo, or 2+ models)
+    +1 = early save (to_netcdf before post-processing / final print statements)
+    """
+    details: dict = {}
+    model_py = run_dir / "model.py"
+
+    if not model_py.exists():
+        details["reason"] = "no model.py"
+        return 0, details
+
+    code = model_py.read_text()
+    score = 0
+
+    # 1. Prior predictive check
+    has_prior_pred = bool(re.search(r'sample_prior_predictive', code))
+    details["prior_predictive"] = has_prior_pred
+    if has_prior_pred:
+        score += 1
+
+    # 2. Convergence diagnostics examined
+    diag_patterns = [
+        r'az\.summary|arviz\.summary',
+        r'az\.rhat|arviz\.rhat',
+        r'az\.ess|arviz\.ess',
+        r'divergi',  # catches "diverging", "divergences", "divergent"
+        r'r_hat',
+    ]
+    diag_found = [p for p in diag_patterns if re.search(p, code)]
+    has_diagnostics = len(diag_found) >= 2  # need at least 2 different checks
+    details["diagnostics"] = {"found": diag_found, "sufficient": has_diagnostics}
+    if has_diagnostics:
+        score += 1
+
+    # 3. Posterior predictive check
+    has_post_pred = bool(re.search(r'sample_posterior_predictive', code))
+    details["posterior_predictive"] = has_post_pred
+    if has_post_pred:
+        score += 1
+
+    # 4. Model comparison or sensitivity analysis
+    comparison_patterns = [
+        r'az\.compare|arviz\.compare',
+        r'az\.loo\b|arviz\.loo\b',
+        r'az\.waic|arviz\.waic',
+        r'compute_log_likelihood',
+    ]
+    # Also check for multiple pm.Model blocks (sensitivity analysis)
+    model_blocks = len(re.findall(r'pm\.Model\(|pymc\.Model\(', code))
+    comparison_found = [p for p in comparison_patterns if re.search(p, code)]
+    has_comparison = len(comparison_found) > 0 or model_blocks >= 2
+    details["model_comparison"] = {
+        "patterns_found": comparison_found,
+        "model_blocks": model_blocks,
+        "sufficient": has_comparison,
+    }
+    if has_comparison:
+        score += 1
+
+    # 5. Early save — to_netcdf appears before the last 20% of the file
+    save_matches = list(re.finditer(r'to_netcdf|to_json', code))
+    if save_matches:
+        first_save_pos = save_matches[0].start()
+        total_len = len(code)
+        save_fraction = first_save_pos / total_len if total_len > 0 else 1.0
+        early_save = save_fraction < 0.80
+        details["early_save"] = {
+            "save_position_frac": round(save_fraction, 2),
+            "is_early": early_save,
+        }
+        if early_save:
+            score += 1
+    else:
+        details["early_save"] = {"save_position_frac": None, "is_early": False}
+
+    return min(score, 5), details
+
+
+def score_parameter_recovery(run_dir: Path, task_id: str, idata=None) -> tuple[int, dict]:
+    """Score criterion 6: Parameter recovery (0-5).
+
+    For tasks with known ground truth, checks whether posterior estimates
+    cover the true values. For tasks without exact ground truth, checks
+    plausibility of estimates.
+    """
+    details: dict = {}
+    nc_path = run_dir / "results.nc"
+
+    if not nc_path.exists():
+        details["reason"] = "no results.nc"
+        return 0, details
+
+    try:
+        if idata is None:
+            idata = az.from_netcdf(str(nc_path))
+        if not hasattr(idata, "posterior") or idata.posterior is None:
+            details["reason"] = "no posterior"
+            return 0, details
+
+        scorer = _RECOVERY_SCORERS.get(task_id)
+        if scorer is None:
+            details["reason"] = f"no recovery scorer for {task_id}"
+            return 0, details
+
+        return scorer(idata, details)
+
+    except Exception as e:
+        details["error"] = str(e)
+        return 0, details
+
+
+def _posterior_all_finite(posterior) -> bool:
+    """Check that all posterior variable means are finite."""
+    return all(
+        np.all(np.isfinite(np.mean(posterior[v].values, axis=(0, 1))))
+        for v in posterior.data_vars
+    )
+
+
+def _recovery_T1_hierarchical(idata, details: dict) -> tuple[int, dict]:
+    """T1: Check school effects are in plausible range."""
+    score = 0
+    posterior = idata.posterior
+
+    # Look for group-level mean (various naming conventions)
+    mu_names = [v for v in posterior.data_vars
+                if any(k in v.lower() for k in ["mu", "mean", "overall", "group"])]
+    details["mu_candidates"] = mu_names
+
+    if mu_names:
+        mu_var = mu_names[0]
+        mu_samples = posterior[mu_var].values.flatten()
+        mu_mean = float(np.mean(mu_samples))
+        details["group_mean"] = round(mu_mean, 2)
+
+        # The grand mean should be roughly 3-12 (weighted avg of school effects)
+        if -5 < mu_mean < 20:
+            score += 2
+            details["group_mean_plausible"] = True
+        else:
+            details["group_mean_plausible"] = False
+
+    # Check that individual school effects exist and vary
+    # Look for array-valued variables (school-level parameters)
+    array_vars = [v for v in posterior.data_vars
+                  if posterior[v].values.ndim > 2]  # chain x draw x schools
+    details["array_vars"] = array_vars[:5]
+
+    if array_vars:
+        var = array_vars[0]
+        means = np.mean(posterior[var].values, axis=(0, 1))
+        details["school_effect_range"] = [round(float(means.min()), 2),
+                                          round(float(means.max()), 2)]
+        # Effects should span a reasonable range
+        if means.max() - means.min() > 1.0:
+            score += 2
+            details["effects_vary"] = True
+        else:
+            score += 1
+            details["effects_vary"] = False
+
+    # Check finite and non-degenerate
+    if _posterior_all_finite(posterior):
+        score += 1
+
+    return min(score, 5), details
+
+
+def _recovery_T2_ordinal(idata, details: dict) -> tuple[int, dict]:
+    """T2: Check cutpoints are ordered and coefficients have expected signs."""
+    score = 0
+    posterior = idata.posterior
+
+    # Look for cutpoints
+    cut_names = [v for v in posterior.data_vars
+                 if any(k in v.lower() for k in ["cutpoint", "threshold", "cut"])]
+    details["cutpoint_vars"] = cut_names
+
+    if cut_names:
+        cut_var = cut_names[0]
+        cut_means = np.mean(posterior[cut_var].values, axis=(0, 1))
+        details["cutpoint_means"] = [round(float(c), 2) for c in cut_means]
+
+        # Cutpoints should be ordered
+        is_ordered = all(cut_means[i] <= cut_means[i + 1]
+                         for i in range(len(cut_means) - 1))
+        details["cutpoints_ordered"] = is_ordered
+        if is_ordered:
+            score += 2
+        else:
+            score += 1
+
+    # Check that depression coefficient is negative (depression -> less satisfaction)
+    dep_names = [v for v in posterior.data_vars
+                 if any(k in v.lower() for k in ["dep", "hlthdep", "depression"])]
+    if dep_names:
+        dep_mean = float(np.mean(posterior[dep_names[0]].values))
+        details["depression_coeff"] = round(dep_mean, 3)
+        if dep_mean < 0:
+            score += 2
+            details["depression_sign_correct"] = True
+        else:
+            score += 1
+            details["depression_sign_correct"] = False
+
+    # Finite check
+    if _posterior_all_finite(posterior):
+        score += 1
+
+    return min(score, 5), details
+
+
+def _recovery_T3_stochastic_volatility(idata, details: dict) -> tuple[int, dict]:
+    """T3: Check latent volatility process is reasonable."""
+    score = 0
+    posterior = idata.posterior
+
+    # Look for volatility-related variables.
+    # Use word-boundary regex for short names like "h" to avoid matching
+    # unrelated variables (e.g., "theta", "alpha").
+    _vol_pat = re.compile(
+        r'vol|log.?vol|sigma_h|(?:^|_)h(?:$|_|\d)|latent|innovation',
+        re.IGNORECASE,
+    )
+    vol_names = [v for v in posterior.data_vars if _vol_pat.search(v)]
+    details["volatility_vars"] = vol_names[:5]
+
+    # Check for nu (degrees of freedom) — should be > 2 and < 30
+    _nu_pat = re.compile(r'(?:^|_)nu(?:$|_|\d)|(?:^|_)df(?:$|_|\d)', re.IGNORECASE)
+    nu_names = [v for v in posterior.data_vars if _nu_pat.search(v)]
+    if nu_names:
+        nu_mean = float(np.mean(posterior[nu_names[0]].values))
+        details["nu_mean"] = round(nu_mean, 2)
+        if 2 < nu_mean < 50:
+            score += 2
+            details["nu_plausible"] = True
+        else:
+            score += 1
+            details["nu_plausible"] = False
+
+    # Check for volatility step size (should be small, < 1)
+    step_names = [v for v in posterior.data_vars
+                  if any(k in v.lower() for k in ["sigma", "step_size", "sigma_h"])]
+    if step_names:
+        for name in step_names:
+            vals = posterior[name].values.flatten()
+            if vals.ndim == 1 and len(vals) > 0:
+                step_mean = float(np.mean(vals))
+                if 0 < step_mean < 2:
+                    score += 1
+                    details["step_size_plausible"] = True
+                    break
+
+    # Finite and non-degenerate
+    if _posterior_all_finite(posterior):
+        score += 1
+
+    # Has time-varying component
+    time_vars = [v for v in posterior.data_vars if posterior[v].values.ndim > 2]
+    if time_vars:
+        score += 1
+        details["has_time_varying"] = True
+
+    return min(score, 5), details
+
+
+def _recovery_T4_mixture(idata, details: dict) -> tuple[int, dict]:
+    """T4: Check mixture component recovery.
+
+    Ground truth: 3 components at [-5.0, 0.0, 5.0], SDs [0.5, 2.0, 0.75],
+    equal weights (1/3 each).
+    """
+    true_centers = np.array([-5.0, 0.0, 5.0])
+    score = 0
+    posterior = idata.posterior
+
+    # Find component means (various naming conventions)
+    mean_names = [v for v in posterior.data_vars
+                  if any(k in v.lower() for k in ["mu", "mean", "center", "loc"])]
+    details["mean_candidates"] = mean_names
+
+    if mean_names:
+        for name in mean_names:
+            vals = posterior[name].values
+            means = np.mean(vals, axis=(0, 1))  # average over chains and draws
+            if means.ndim == 0:
+                continue  # scalar, not component means
+            means_sorted = np.sort(means.flatten())
+            details["component_means"] = [round(float(m), 2) for m in means_sorted]
+
+            if len(means_sorted) >= 3:
+                # Check how many true centers are recovered (within 1.5)
+                recovered = 0
+                for tc in true_centers:
+                    if any(abs(m - tc) < 1.5 for m in means_sorted):
+                        recovered += 1
+                details["centers_recovered"] = recovered
+
+                if recovered == 3:
+                    score += 3
+                elif recovered == 2:
+                    score += 2
+                elif recovered >= 1:
+                    score += 1
+                break
+            elif len(means_sorted) >= 2:
+                score += 1
+                details["note"] = f"only {len(means_sorted)} components found"
+                break
+
+    # Check weights sum to ~1 and are not degenerate.
+    # Use word-boundary regex for short names like "w" and "pi" to avoid
+    # matching unrelated variables (e.g., "mu_raw", "spike").
+    _wt_pat = re.compile(
+        r'weight|(?:^|_)w(?:$|_|\d)|(?:^|_)pi(?:$|_|\d)|mix.?prob',
+        re.IGNORECASE,
+    )
+    weight_names = [v for v in posterior.data_vars if _wt_pat.search(v)]
+    if weight_names:
+        for name in weight_names:
+            w_vals = np.mean(posterior[name].values, axis=(0, 1))
+            if w_vals.ndim > 0 and len(w_vals) >= 2:
+                details["weights"] = [round(float(w), 3) for w in w_vals]
+                weight_sum = float(np.sum(w_vals))
+                if 0.95 < weight_sum < 1.05:
+                    score += 1
+                    details["weights_valid"] = True
+                break
+
+    # Finite posteriors
+    if _posterior_all_finite(posterior):
+        score += 1
+
+    return min(score, 5), details
+
+
+def _recovery_T5_horseshoe(idata, details: dict) -> tuple[int, dict]:
+    """T5: Check shrinkage — at least some coefficients near zero."""
+    score = 0
+    posterior = idata.posterior
+
+    # Find coefficient variables (beta, coeff, etc.)
+    coeff_names = [v for v in posterior.data_vars
+                   if any(k in v.lower() for k in ["beta", "coeff", "b_"])]
+    details["coeff_candidates"] = coeff_names
+
+    if coeff_names:
+        # Collect all coefficient means
+        all_means = []
+        for name in coeff_names:
+            vals = posterior[name].values
+            means = np.mean(vals, axis=(0, 1)).flatten()
+            all_means.extend(means.tolist())
+
+        if all_means:
+            all_means = np.array(all_means)
+            details["coeff_means"] = [round(float(m), 3) for m in all_means]
+
+            # Count how many are shrunk near zero (|mean| < 0.1)
+            near_zero = int(np.sum(np.abs(all_means) < 0.1))
+            not_zero = int(np.sum(np.abs(all_means) >= 0.1))
+            details["near_zero_count"] = near_zero
+            details["not_zero_count"] = not_zero
+
+            # Good shrinkage: some near zero, some not
+            if near_zero >= 2 and not_zero >= 1:
+                score += 3
+                details["shrinkage_pattern"] = "good"
+            elif near_zero >= 1:
+                score += 2
+                details["shrinkage_pattern"] = "partial"
+            elif not_zero > 0:
+                score += 1
+                details["shrinkage_pattern"] = "weak"
+
+    # Check for tau (global shrinkage) — should be small
+    tau_names = [v for v in posterior.data_vars
+                 if any(k in v.lower() for k in ["tau", "global_shrinkage"])]
+    if tau_names:
+        tau_mean = float(np.mean(posterior[tau_names[0]].values))
+        details["tau_mean"] = round(tau_mean, 4)
+        if 0 < tau_mean < 5:
+            score += 1
+
+    # Finite posteriors
+    if _posterior_all_finite(posterior):
+        score += 1
+
+    return min(score, 5), details
+
+
+# Registry of task-specific recovery scorers
+_RECOVERY_SCORERS = {
+    "T1_hierarchical": _recovery_T1_hierarchical,
+    "T2_ordinal": _recovery_T2_ordinal,
+    "T3_stochastic_volatility": _recovery_T3_stochastic_volatility,
+    "T4_mixture": _recovery_T4_mixture,
+    "T5_horseshoe": _recovery_T5_horseshoe,
+}
+
+
 def _count_rewrites_from_turns(turns_path: Path) -> tuple[int, int]:
     """Count model.py writes and bash executions from turns.jsonl.
 
@@ -490,119 +886,11 @@ def _count_rewrites_from_turns(turns_path: Path) -> tuple[int, int]:
     return model_writes, bash_runs
 
 
-def score_thrashing(run_dir: Path) -> tuple[int, dict]:
-    """Score criterion 5: Answer thrashing (0-5, 5 = best).
-
-    Measures how many rewrite cycles Claude went through before producing
-    a working model. Fewer rewrites = skill provided correct patterns.
-
-    5 = 0 rewrites (single write, single run, success)
-    4 = 1 rewrite (one error-fix cycle)
-    3 = 2 rewrites
-    2 = 3 rewrites
-    1 = 4+ rewrites or recurring same error
-    0 = no model.py produced, or timeout with no progress
-    """
-    details = {}
-    turns_path = run_dir / "turns.jsonl"
-
-    if not turns_path.exists():
-        # Fallback: use num_turns from metadata as a rough proxy
-        meta_path = run_dir / "metadata.json"
-        if not meta_path.exists():
-            return 0, {"reason": "no metadata"}
-
-        meta = json.loads(meta_path.read_text())
-        num_turns = meta.get("num_turns", 0)
-        details["method"] = "fallback_num_turns"
-        details["num_turns"] = num_turns
-
-        if num_turns == 0:
-            return 0, details
-
-        # Relaxed thresholds when we don't have detailed turn data
-        # Assume ~1 rewrite per 6 extra turns beyond the initial ~6
-        estimated_rewrites = max(0, (num_turns - 6) // 6)
-        details["estimated_rewrites"] = estimated_rewrites
-
-        if estimated_rewrites == 0:
-            return 5, details
-        elif estimated_rewrites == 1:
-            return 4, details
-        elif estimated_rewrites == 2:
-            return 3, details
-        elif estimated_rewrites == 3:
-            return 2, details
-        else:
-            return 1, details
-
-    model_writes, bash_runs = _count_rewrites_from_turns(turns_path)
-    details["method"] = "turns_analysis"
-    details["model_writes"] = model_writes
-    details["bash_runs"] = bash_runs
-
-    if model_writes == 0:
-        details["reason"] = "no model.py writes"
-        return 0, details
-
-    # Rewrites = writes beyond the first one
-    rewrites = max(0, model_writes - 1)
-    details["rewrites"] = rewrites
-
-    if rewrites == 0:
-        return 5, details
-    elif rewrites == 1:
-        return 4, details
-    elif rewrites == 2:
-        return 3, details
-    elif rewrites == 3:
-        return 2, details
-    else:
-        return 1, details
-
-
-def score_efficiency(run_dir: Path) -> tuple[int, dict]:
-    """Score criterion 6: Efficiency (0-5, 5 = fastest).
-
-    Measures how many turns Claude needed. Fewer turns = more efficient.
-
-    5 = 1-6 turns
-    4 = 7-12 turns
-    3 = 13-18 turns
-    2 = 19-25 turns
-    1 = 26-35 turns
-    0 = >35 turns or timeout (0 turns)
-    """
-    details = {}
-    meta_path = run_dir / "metadata.json"
-
-    if not meta_path.exists():
-        return 0, {"reason": "no metadata"}
-
-    meta = json.loads(meta_path.read_text())
-    num_turns = meta.get("num_turns", 0)
-    details["num_turns"] = num_turns
-
-    if num_turns == 0:
-        return 0, details
-    elif num_turns <= 6:
-        return 5, details
-    elif num_turns <= 12:
-        return 4, details
-    elif num_turns <= 18:
-        return 3, details
-    elif num_turns <= 25:
-        return 2, details
-    elif num_turns <= 35:
-        return 1, details
-    else:
-        return 0, details
-
-
 def evaluate_pass_fail(
     run_dir: Path,
     model_produced_score: int,
     convergence_score: int,
+    idata=None,
 ) -> tuple[bool, dict]:
     """Evaluate hard pass/fail gate for a benchmark run.
 
@@ -635,10 +923,8 @@ def evaluate_pass_fail(
         return False, details
 
     try:
-        import arviz as az
-        import numpy as np
-
-        idata = az.from_netcdf(str(nc_path))
+        if idata is None:
+            idata = az.from_netcdf(str(nc_path))
         if not hasattr(idata, "posterior") or idata.posterior is None:
             details["non_degenerate"] = False
             details["reason"] = "no posterior group"
@@ -684,6 +970,7 @@ def count_retries(run_dir: Path) -> tuple[int, dict]:
     """Count raw error-fix cycles (model.py rewrites beyond the first).
 
     Uses turns.jsonl if available, otherwise falls back to metadata heuristic.
+    Reported as informational metadata, not scored.
     """
     details: dict = {}
     turns_path = run_dir / "turns.jsonl"
@@ -725,22 +1012,26 @@ def _get_wall_time(run_dir: Path) -> float:
 def score_run(run_dir: Path, task_id: str, condition: str, rep: int) -> ScoreResult:
     """Score all criteria for a single benchmark run."""
     result = ScoreResult(task_id=task_id, condition=condition, rep=rep)
+    
+    # Load InferenceData once if it exists
+    nc_path = run_dir / "results.nc"
+    idata = None
+    if nc_path.exists():
+        try:
+            idata = az.from_netcdf(str(nc_path))
+        except Exception as e:
+            logger.warning(f"Failed to load {nc_path}: {e}")
 
-    mp_score, mp_details = score_model_produced(run_dir)
+    mp_score, mp_details = score_model_produced(run_dir, idata=idata)
     result.model_produced = mp_score
     result.details["model_produced"] = mp_details
 
-    conv_score, conv_details = score_convergence(run_dir)
+    conv_score, conv_details = score_convergence(run_dir, idata=idata)
     result.convergence = conv_score
     result.details["convergence"] = conv_details
 
-    # Partial credit: if sampling completed but something crashed after,
-    # still score convergence
-    if mp_score >= 3 and _sampling_completed(run_dir):
-        # Already scored above
-        pass
-    elif mp_score < 3:
-        # No usable posterior — convergence is 0
+    # No usable posterior — convergence is 0
+    if mp_score < 3:
         result.convergence = 0
 
     ma_score, ma_details = score_model_appropriateness_llm(run_dir, task_id)
@@ -751,36 +1042,34 @@ def score_run(run_dir: Path, task_id: str, condition: str, rep: int) -> ScoreRes
     result.best_practices = bp_score
     result.details["best_practices"] = bp_details
 
-    thr_score, thr_details = score_thrashing(run_dir)
-    result.thrashing = thr_score
-    result.details["thrashing"] = thr_details
+    wf_score, wf_details = score_workflow(run_dir)
+    result.workflow = wf_score
+    result.details["workflow"] = wf_details
 
-    eff_score, eff_details = score_efficiency(run_dir)
-    result.efficiency = eff_score
-    result.details["efficiency"] = eff_details
+    pr_score, pr_details = score_parameter_recovery(run_dir, task_id, idata=idata)
+    result.parameter_recovery = pr_score
+    result.details["parameter_recovery"] = pr_details
 
     result.compute_total()
 
     passed, pf_details = evaluate_pass_fail(
-        run_dir, result.model_produced, result.convergence
+        run_dir, result.model_produced, result.convergence, idata=idata
     )
     result.passed = passed
     result.details["pass_fail"] = pf_details
 
     # Override for runs that exceeded the timeout cap — treat as failures
     wall_time = _get_wall_time(run_dir)
-    if wall_time > TIMEOUT_CAP:
+    if wall_time > DEFAULT_TIMEOUT:
         result.passed = False
-        result.efficiency = 0
-        result.compute_total()
         result.details["timeout_override"] = {
             "wall_time": wall_time,
-            "cap": TIMEOUT_CAP,
-            "reason": f"wall_time {wall_time:.0f}s exceeds {TIMEOUT_CAP}s cap",
+            "cap": DEFAULT_TIMEOUT,
+            "reason": f"wall_time {wall_time:.0f}s exceeds {DEFAULT_TIMEOUT}s cap",
         }
         logger.warning(
             f"Timeout override: {task_id} {condition} rep{rep} "
-            f"wall_time={wall_time:.0f}s > {TIMEOUT_CAP}s"
+            f"wall_time={wall_time:.0f}s > {DEFAULT_TIMEOUT}s"
         )
 
     retries, retry_details = count_retries(run_dir)
@@ -791,7 +1080,7 @@ def score_run(run_dir: Path, task_id: str, condition: str, rep: int) -> ScoreRes
         f"Score {task_id} {condition} rep{rep}: "
         f"produced={result.model_produced} conv={result.convergence} "
         f"approp={result.model_appropriateness} bp={result.best_practices} "
-        f"thrash={result.thrashing} eff={result.efficiency} "
+        f"workflow={result.workflow} recovery={result.parameter_recovery} "
         f"total={result.total} passed={result.passed} retries={result.retries}"
     )
 
@@ -804,8 +1093,7 @@ def score_all(runs_dir: Path | None = None) -> list[ScoreResult]:
         runs_dir = RUNS_DIR
 
     # Load valid task IDs from tasks.yaml
-    with open(TASKS_PATH) as f:
-        valid_tasks = set(yaml.safe_load(f)["tasks"].keys())
+    valid_tasks = set(load_tasks()["tasks"].keys())
 
     results = []
     for run_dir in sorted(runs_dir.iterdir()):
@@ -846,8 +1134,8 @@ def score_all(runs_dir: Path | None = None) -> list[ScoreResult]:
             "convergence": score.convergence,
             "model_appropriateness": score.model_appropriateness,
             "best_practices": score.best_practices,
-            "thrashing": score.thrashing,
-            "efficiency": score.efficiency,
+            "workflow": score.workflow,
+            "parameter_recovery": score.parameter_recovery,
             "total": score.total,
             "passed": score.passed,
             "retries": score.retries,

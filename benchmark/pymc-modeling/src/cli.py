@@ -16,8 +16,6 @@ import sys
 import time
 from pathlib import Path
 
-import yaml
-
 from src.analysis import generate_report, load_scores
 from src.runner import (
     RESULTS_DIR,
@@ -60,6 +58,7 @@ def cmd_run(args):
         force=args.force,
         resume=args.resume,
         tasks=task_ids,
+        max_workers=args.workers,
     )
 
     # Summary
@@ -93,8 +92,8 @@ def cmd_score(args):
             f"{r.task_id} {r.condition} rep{r.rep}: "
             f"produced={r.model_produced} conv={r.convergence} "
             f"approp={r.model_appropriateness} bp={r.best_practices} "
-            f"thrash={r.thrashing} eff={r.efficiency} "
-            f"total={r.total}/30"
+            f"workflow={r.workflow} recovery={r.parameter_recovery} "
+            f"total={r.total}"
         )
 
     return 0
@@ -181,8 +180,9 @@ def cmd_validate(args):
     # Check 4: model.py produced
     for cond, run_dir in [("no_skill", no_skill_dir), ("with_skill", with_skill_dir)]:
         model_py = run_dir / "model.py"
-        if model_py.exists() and model_py.stat().st_size > 100:
-            log(f"PASS: model.py exists in {cond} ({model_py.stat().st_size} bytes)")
+        model_size = model_py.stat().st_size if model_py.exists() else 0
+        if model_size > 100:
+            log(f"PASS: model.py exists in {cond} ({model_size} bytes)")
             checks.append((f"model_py_{cond}", True, []))
         else:
             log(f"FAIL: model.py missing or too small in {cond}")
@@ -216,7 +216,7 @@ def cmd_validate(args):
     for cond, run_dir in [("no_skill", no_skill_dir), ("with_skill", with_skill_dir)]:
         try:
             score = score_run(run_dir, "T1_hierarchical", cond, 0)
-            log(f"PASS: Scorer returned total={score.total}/30 for {cond}")
+            log(f"PASS: Scorer returned total={score.total} for {cond}")
             checks.append((f"scorer_{cond}", True, []))
         except Exception as e:
             log(f"FAIL: Scorer error in {cond}: {e}")
@@ -274,12 +274,14 @@ def cmd_status(args):
     task_ids = list(config["tasks"].keys())
     conditions = ["no_skill", "with_skill"]
 
+    num_reps = args.reps
+
     print(f"{'Task':<25} {'Condition':<12} {'Rep':>4} {'Run':>6} {'Score':>6}")
     print("-" * 60)
 
     for task_id in task_ids:
         for condition in conditions:
-            for rep in range(3):
+            for rep in range(num_reps):
                 run_dir = get_run_dir(task_id, condition, rep)
                 has_run = (run_dir / "metadata.json").exists()
                 has_score = (
@@ -311,11 +313,12 @@ def main():
     p_run = sub.add_parser("run", help="Run benchmark tasks")
     p_run.add_argument("--all", action="store_true", help="Run all tasks")
     p_run.add_argument("--task", default="T1_hierarchical", help="Task ID to run")
-    p_run.add_argument("--reps", type=int, default=3, help="Replications per condition")
+    p_run.add_argument("--reps", type=int, default=5, help="Replications per condition")
     p_run.add_argument("--force", action="store_true", help="Overwrite cached results")
     p_run.add_argument(
         "--resume", action="store_true", help="Re-run only missing/failed"
     )
+    p_run.add_argument("--workers", type=int, default=3, help="Max parallel runs")
 
     # score
     p_score = sub.add_parser("score", help="Score completed runs")
@@ -335,7 +338,8 @@ def main():
     sub.add_parser("list-tasks", help="List available tasks")
 
     # status
-    sub.add_parser("status", help="Show run/score status")
+    p_status = sub.add_parser("status", help="Show run/score status")
+    p_status.add_argument("--reps", type=int, default=5, help="Number of reps to display")
 
     args = parser.parse_args()
     setup_logging(args.verbose)

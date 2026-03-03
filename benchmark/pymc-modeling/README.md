@@ -105,7 +105,7 @@ pixi run python -m src.cli run --all
 Options:
 
 ```
---reps N       Replications per task/condition (default: 3)
+--reps N       Replications per task/condition (default: 5)
 --force        Overwrite cached results
 --resume       Re-run only missing or failed runs
 --task T1_hierarchical   Run a single task
