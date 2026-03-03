@@ -454,7 +454,6 @@ def score_workflow(run_dir: Path) -> tuple[int, dict]:
         return 0, details
 
     code = model_py.read_text()
-    lines = code.splitlines()
     score = 0
 
     # 1. Prior predictive check
@@ -660,15 +659,19 @@ def _recovery_T3_stochastic_volatility(idata, details: dict) -> tuple[int, dict]
     score = 0
     posterior = idata.posterior
 
-    # Look for volatility-related variables
-    vol_names = [v for v in posterior.data_vars
-                 if any(k in v.lower() for k in ["vol", "h", "log_vol", "sigma_h",
-                                                  "step", "innovation"])]
+    # Look for volatility-related variables.
+    # Use word-boundary regex for short names like "h" to avoid matching
+    # unrelated variables (e.g., "theta", "alpha").
+    _vol_pat = re.compile(
+        r'vol|log.?vol|sigma_h|(?:^|_)h(?:$|_|\d)|latent|innovation',
+        re.IGNORECASE,
+    )
+    vol_names = [v for v in posterior.data_vars if _vol_pat.search(v)]
     details["volatility_vars"] = vol_names[:5]
 
     # Check for nu (degrees of freedom) — should be > 2 and < 30
-    nu_names = [v for v in posterior.data_vars
-                if any(k in v.lower() for k in ["nu", "df"])]
+    _nu_pat = re.compile(r'(?:^|_)nu(?:$|_|\d)|(?:^|_)df(?:$|_|\d)', re.IGNORECASE)
+    nu_names = [v for v in posterior.data_vars if _nu_pat.search(v)]
     if nu_names:
         nu_mean = float(np.mean(posterior[nu_names[0]].values))
         details["nu_mean"] = round(nu_mean, 2)
@@ -749,9 +752,14 @@ def _recovery_T4_mixture(idata, details: dict) -> tuple[int, dict]:
                 details["note"] = f"only {len(means_sorted)} components found"
                 break
 
-    # Check weights sum to ~1 and are not degenerate
-    weight_names = [v for v in posterior.data_vars
-                    if any(k in v.lower() for k in ["weight", "w", "pi"])]
+    # Check weights sum to ~1 and are not degenerate.
+    # Use word-boundary regex for short names like "w" and "pi" to avoid
+    # matching unrelated variables (e.g., "mu_raw", "spike").
+    _wt_pat = re.compile(
+        r'weight|(?:^|_)w(?:$|_|\d)|(?:^|_)pi(?:$|_|\d)|mix.?prob',
+        re.IGNORECASE,
+    )
+    weight_names = [v for v in posterior.data_vars if _wt_pat.search(v)]
     if weight_names:
         for name in weight_names:
             w_vals = np.mean(posterior[name].values, axis=(0, 1))

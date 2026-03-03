@@ -17,7 +17,7 @@ from src.analysis import (
 )
 
 
-def _create_score_files(scores_dir: Path, task_id: str, reps: int = 3):
+def _create_score_files(scores_dir: Path, task_id: str, reps: int = 5):
     """Helper: create synthetic score files for testing."""
     scores_dir.mkdir(parents=True, exist_ok=True)
 
@@ -87,7 +87,7 @@ class TestLoadScores:
         scores_dir = tmp_path / "scores"
         _create_score_files(scores_dir, "T1_hierarchical")
         df = load_scores(scores_dir)
-        assert len(df) == 6  # 2 conditions * 3 reps
+        assert len(df) == 10  # 2 conditions * 5 reps
         assert "task_id" in df.columns
         assert "total" in df.columns
 
@@ -119,7 +119,7 @@ class TestLoadScoresNewFields:
         # with_skill runs should pass, no_skill should not
         ws = df.filter(pl.col("condition") == "with_skill")
         ns = df.filter(pl.col("condition") == "no_skill")
-        assert ws.get_column("passed").sum() == 3
+        assert ws.get_column("passed").sum() == 5
         assert ns.get_column("passed").sum() == 0
 
     def test_backward_compat_defaults(self, tmp_path):

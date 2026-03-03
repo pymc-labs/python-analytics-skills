@@ -496,3 +496,167 @@ class TestScoreParameterRecovery:
         score, details = score_parameter_recovery(run_dir, "T5_horseshoe")
         assert score >= 3
         assert details.get("shrinkage_pattern") == "good"
+
+    def test_t4_false_positive_weight_names(self, run_dir):
+        """T4: variables like 'mu_raw', 'spike' must NOT be treated as weights."""
+        import arviz as az
+        import xarray as xr
+
+        rng = np.random.default_rng(42)
+        n_chains, n_draws = 4, 500
+        # Component means near [-5, 0, 5]
+        mu = np.stack([
+            rng.normal([-5.0, 0.0, 5.0], 0.3, (n_draws, 3))
+            for _ in range(n_chains)
+        ])
+        # Variables whose names contain "w" or "pi" as substrings
+        # but are NOT mixture weights
+        mu_raw = rng.normal(0, 1, (n_chains, n_draws, 3))
+        sigma_raw = rng.normal(0, 1, (n_chains, n_draws, 3))
+        spike = rng.normal(0, 1, (n_chains, n_draws, 3))
+        # Actual weights under an unambiguous name
+        weights = rng.dirichlet([10, 10, 10], (n_chains, n_draws))
+
+        posterior = xr.Dataset(
+            {
+                "mu": (["chain", "draw", "component"], mu),
+                "mu_raw": (["chain", "draw", "component"], mu_raw),
+                "sigma_raw": (["chain", "draw", "component"], sigma_raw),
+                "spike": (["chain", "draw", "component"], spike),
+                "weights": (["chain", "draw", "component"], weights),
+            },
+            coords={
+                "chain": range(n_chains),
+                "draw": range(n_draws),
+                "component": range(3),
+            },
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": (["chain", "draw"],
+                           np.zeros((n_chains, n_draws), dtype=bool))},
+            coords={"chain": range(n_chains), "draw": range(n_draws)},
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+        idata.to_netcdf(str(run_dir / "results.nc"))
+
+        score, details = score_parameter_recovery(run_dir, "T4_mixture")
+        # "weights" should be found, but "mu_raw", "sigma_raw", "spike" should not
+        assert details.get("weights_valid") is True
+        assert score >= 3
+
+    def test_t4_no_false_weight_without_real_weight(self, run_dir):
+        """T4: 'mu_raw' alone must NOT be mistaken for a weight variable."""
+        import arviz as az
+        import xarray as xr
+
+        rng = np.random.default_rng(42)
+        n_chains, n_draws = 4, 500
+        mu = np.stack([
+            rng.normal([-5.0, 0.0, 5.0], 0.3, (n_draws, 3))
+            for _ in range(n_chains)
+        ])
+        # Only false-positive names, no real weight variable
+        mu_raw = rng.normal(0, 50, (n_chains, n_draws, 3))  # not valid weights
+
+        posterior = xr.Dataset(
+            {
+                "mu": (["chain", "draw", "component"], mu),
+                "mu_raw": (["chain", "draw", "component"], mu_raw),
+            },
+            coords={
+                "chain": range(n_chains),
+                "draw": range(n_draws),
+                "component": range(3),
+            },
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": (["chain", "draw"],
+                           np.zeros((n_chains, n_draws), dtype=bool))},
+            coords={"chain": range(n_chains), "draw": range(n_draws)},
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+        idata.to_netcdf(str(run_dir / "results.nc"))
+
+        score, details = score_parameter_recovery(run_dir, "T4_mixture")
+        # mu_raw should NOT be matched as a weight variable
+        assert "weights_valid" not in details
+
+    def test_t3_false_positive_volatility_names(self, run_dir):
+        """T3: variables like 'theta', 'alpha' must NOT be treated as volatility."""
+        import arviz as az
+        import xarray as xr
+
+        rng = np.random.default_rng(42)
+        n_chains, n_draws, n_time = 4, 500, 100
+        # Variables with "h" as a substring but NOT volatility
+        theta = rng.normal(0, 1, (n_chains, n_draws))
+        alpha = rng.normal(0, 1, (n_chains, n_draws))
+        # Actual volatility process
+        volatility = rng.normal(0, 0.5, (n_chains, n_draws, n_time))
+        nu = rng.exponential(10, (n_chains, n_draws)) + 2
+        sigma = np.abs(rng.normal(0.1, 0.02, (n_chains, n_draws)))
+
+        posterior = xr.Dataset(
+            {
+                "theta": (["chain", "draw"], theta),
+                "alpha": (["chain", "draw"], alpha),
+                "volatility": (["chain", "draw", "time"], volatility),
+                "nu": (["chain", "draw"], nu),
+                "sigma": (["chain", "draw"], sigma),
+            },
+            coords={
+                "chain": range(n_chains),
+                "draw": range(n_draws),
+                "time": range(n_time),
+            },
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": (["chain", "draw"],
+                           np.zeros((n_chains, n_draws), dtype=bool))},
+            coords={"chain": range(n_chains), "draw": range(n_draws)},
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+        idata.to_netcdf(str(run_dir / "results.nc"))
+
+        score, details = score_parameter_recovery(run_dir, "T3_stochastic_volatility")
+        # "volatility" should be found; "theta" and "alpha" should NOT
+        vol_vars = details.get("volatility_vars", [])
+        assert "volatility" in vol_vars
+        assert "theta" not in vol_vars
+        assert "alpha" not in vol_vars
+        assert score >= 3
+
+    def test_t3_h_exact_name_matches(self, run_dir):
+        """T3: bare 'h' and 'h_t' should match as volatility variables."""
+        import arviz as az
+        import xarray as xr
+
+        rng = np.random.default_rng(42)
+        n_chains, n_draws, n_time = 4, 500, 100
+        h = rng.normal(0, 0.5, (n_chains, n_draws, n_time))
+        nu = rng.exponential(10, (n_chains, n_draws)) + 2
+        sigma = np.abs(rng.normal(0.1, 0.02, (n_chains, n_draws)))
+
+        posterior = xr.Dataset(
+            {
+                "h": (["chain", "draw", "time"], h),
+                "nu": (["chain", "draw"], nu),
+                "sigma": (["chain", "draw"], sigma),
+            },
+            coords={
+                "chain": range(n_chains),
+                "draw": range(n_draws),
+                "time": range(n_time),
+            },
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": (["chain", "draw"],
+                           np.zeros((n_chains, n_draws), dtype=bool))},
+            coords={"chain": range(n_chains), "draw": range(n_draws)},
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+        idata.to_netcdf(str(run_dir / "results.nc"))
+
+        score, details = score_parameter_recovery(run_dir, "T3_stochastic_volatility")
+        assert "h" in details.get("volatility_vars", [])
+        assert score >= 3

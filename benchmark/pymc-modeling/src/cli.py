@@ -313,7 +313,7 @@ def main():
     p_run = sub.add_parser("run", help="Run benchmark tasks")
     p_run.add_argument("--all", action="store_true", help="Run all tasks")
     p_run.add_argument("--task", default="T1_hierarchical", help="Task ID to run")
-    p_run.add_argument("--reps", type=int, default=3, help="Replications per condition")
+    p_run.add_argument("--reps", type=int, default=5, help="Replications per condition")
     p_run.add_argument("--force", action="store_true", help="Overwrite cached results")
     p_run.add_argument(
         "--resume", action="store_true", help="Re-run only missing/failed"

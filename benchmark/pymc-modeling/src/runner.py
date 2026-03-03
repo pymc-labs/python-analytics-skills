@@ -157,9 +157,9 @@ def is_cached(task_id: str, condition: str, rep: int) -> bool:
     return (run_dir / "metadata.json").exists()
 
 
-def _setup_working_dir(task_id: str, task_config: dict) -> Path:
+def _setup_working_dir(task_id: str, condition: str, rep: int, task_config: dict) -> Path:
     """Create an isolated working directory with required data files."""
-    work_dir = Path(f"/tmp/benchmark/{task_id}_{int(time.time())}")
+    work_dir = Path(f"/tmp/benchmark/{task_id}_{condition}_rep{rep}_{int(time.time())}")
     work_dir.mkdir(parents=True, exist_ok=True)
     data_dest = work_dir / "data"
     data_dest.mkdir(exist_ok=True)
@@ -369,7 +369,8 @@ def run_single(
         if meta.get("num_turns", 0) == 0:
             turns_path = run_dir / "turns.jsonl"
             if turns_path.exists():
-                num_lines = sum(1 for _ in open(turns_path))
+                with open(turns_path) as f:
+                    num_lines = sum(1 for _ in f)
                 if num_lines > 0:
                     meta["num_turns"] = num_lines
                     (run_dir / "metadata.json").write_text(
@@ -399,7 +400,7 @@ def run_single(
     task = config["tasks"][task_id]
 
     # Set up isolated working dir
-    work_dir = _setup_working_dir(task_id, task)
+    work_dir = _setup_working_dir(task_id, condition, rep, task)
     logger.info(f"Working dir: {work_dir}")
 
     # Build prompt and command
@@ -560,7 +561,7 @@ def run_single(
 
 
 def run_all(
-    reps: int = 3,
+    reps: int = 5,
     force: bool = False,
     resume: bool = False,
     tasks: list[str] | None = None,

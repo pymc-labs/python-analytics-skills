@@ -78,7 +78,7 @@ Claude runs in `--print` mode with tool access (Bash, Read, Write, Glob, Grep). 
 
 ### Replications
 
-3 replications per task per condition = **30 total runs** (5 tasks × 2 conditions × 3 reps). Conditions are interleaved to avoid time-of-day effects.
+5 replications per task per condition = **50 total runs** (5 tasks × 2 conditions × 5 reps). Conditions are interleaved to avoid time-of-day effects.
 
 ---
 
@@ -202,8 +202,8 @@ The tasks mirror real-world Bayesian modeling challenges: hierarchical data, ord
 # Validation (required before full suite)
 pixi run python -m src.cli validate
 
-# Run all tasks (30 runs)
-pixi run python -m src.cli run --all --reps 3
+# Run all tasks (50 runs)
+pixi run python -m src.cli run --all --reps 5
 
 # Run single task
 pixi run python -m src.cli run --task T1_hierarchical
