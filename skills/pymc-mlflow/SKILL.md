@@ -15,7 +15,9 @@ MLflow experiment tracking and artifact management for PyMC Bayesian workflows.
 
 ## Purpose and Scope
 
-This skill bridges PyMC modeling and production deployment through MLflow's tracking infrastructure. It focuses on the intersection of PyMC and MLflow—not general MLflow best practices (see separate MLflow skills) or detailed Bayesian modeling (see `pymc-modeling` skill).
+This skill bridges PyMC modeling and production deployment through MLflow's tracking infrastructure. It focuses on the intersection of PyMC and MLflow—not general MLflow best practices (see separate MLflow skills) or detailed Bayesian modeling.
+
+**For modeling guidance** (prior selection, model specification, parameterization, convergence diagnostics, posterior predictive checks), see the `pymc-modeling` skill. This skill assumes you know how to build and diagnose PyMC models and focuses exclusively on MLflow integration patterns.
 
 **What this covers**:
 - Autologging with `pymc_marketing.mlflow.autolog()`
@@ -104,8 +106,12 @@ with mlflow.start_run(log_system_metrics=True):
     # Tag for filtering
     mlflow.set_tag("run_type", "test")
     
+    # Log random seed for reproducibility
+    RANDOM_SEED = 42
+    mlflow.log_param("random_seed", RANDOM_SEED)
+    
     # Use model= parameter to avoid nested context
-    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4)
+    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4, random_seed=RANDOM_SEED)
 ```
 
 **What gets logged automatically by `pymc_marketing.mlflow.autolog()`**:
@@ -118,7 +124,7 @@ with mlflow.start_run(log_system_metrics=True):
    - Graph complexity (number of nodes, distributions)
 3. **`pymc_marketing.mlflow.log_sample_diagnostics()`**: 
    - Divergence count
-   - ESS (bulk and tail)
+   - ESS bulk and tail (total across chains)
    - r_hat statistics
    - Tree depth
 4. **`pymc_marketing.mlflow.log_arviz_summary()`**: Parameter summary table (mean, sd, HDI, ESS, r_hat)
@@ -166,11 +172,13 @@ with mlflow.start_run():
     draws = 1000
     chains = 4
     sampler = "nutpie"
+    random_seed = 42
     
     mlflow.log_param("sampler", sampler)
     mlflow.log_param("draws", draws)
     mlflow.log_param("chains", chains)
     mlflow.log_param("total_samples", draws * chains)  # Critical for filtering
+    mlflow.log_param("random_seed", random_seed)  # For reproducibility
     
     # ============================================
     # MODEL CONFIGURATION (log before sampling)
@@ -200,7 +208,7 @@ with mlflow.start_run():
         pm.sample = pymc.testing.mock_sample
     
     # Full sampling with model= parameter to avoid nested context
-    idata = pm.sample(model=model, nuts_sampler=sampler, draws=draws, chains=chains)
+    idata = pm.sample(model=model, nuts_sampler=sampler, draws=draws, chains=chains, random_seed=random_seed)
 ```
 
 **Why these tags matter**:
@@ -250,6 +258,7 @@ with mlflow.start_run():
     mlflow.set_tag("mock_fit", str(mock_fit))
     mlflow.log_param("draws", 1000)
     mlflow.log_param("chains", 4)
+    mlflow.log_param("random_seed", 42)
     
     if mock_fit:
         # Replace pm.sample with mock sampler for instant results
@@ -257,7 +266,7 @@ with mlflow.start_run():
         pm.sample = pymc.testing.mock_sample
     
     # Same call regardless of mock_fit—clean interface
-    idata = pm.sample(model=model, draws=1000, chains=4)
+    idata = pm.sample(model=model, draws=1000, chains=4, random_seed=42)
 ```
 
 **What `mock_sample` does**:
@@ -279,7 +288,7 @@ with mlflow.start_run():
 
 ### System Metrics Monitoring
 
-MLflow can automatically log system resource usage (CPU, GPU, memory, network, disk) during sampling—particularly useful when using different PyMC backends (CPU vs GPU samplers) or for long-running models.
+MLflow can automatically log system resource usage (CPU, GPU, memory, network, disk) during sampling—particularly useful when comparing different samplers (nutpie on CPU vs numpyro on GPU) or monitoring long-running models.
 
 **Installation requirements**:
 ```bash
@@ -305,7 +314,7 @@ with pm.Model() as model:
 # Enable system metrics for this run only
 with mlflow.start_run(log_system_metrics=True):
     mlflow.set_tag("sampler_backend", "nutpie")
-    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=2000, chains=4)
+    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=2000, chains=4, random_seed=42)
 ```
 
 **Enable globally** (for all runs in session):
@@ -320,7 +329,7 @@ mlflow.enable_system_metrics_logging()
 
 # Now all runs will log system metrics
 with mlflow.start_run():
-    idata = pm.sample(model=model, draws=2000, chains=4)
+    idata = pm.sample(model=model, draws=2000, chains=4, random_seed=42)
 ```
 
 **System metrics logged by default**:
@@ -338,11 +347,11 @@ mlflow.set_system_metrics_sampling_interval(5)
 mlflow.set_system_metrics_samples_before_logging(2)
 
 with mlflow.start_run(log_system_metrics=True):
-    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=2000, chains=4)
+    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=2000, chains=4, random_seed=42)
 ```
 
 **When to use**:
-- **Comparing sampler backends**: Track GPU utilization for numpyro/JAX vs CPU for nutpie
+- **Comparing sampler backends**: Track GPU utilization for numpyro (JAX backend) vs CPU for nutpie (PyTensor/Rust backend)
 - **Long-running models**: Monitor resource usage over hours-long sampling runs
 - **Production deployment**: Benchmark resource requirements for scaling decisions
 - **Debugging**: Identify memory leaks or unexpected resource consumption
@@ -380,6 +389,7 @@ with mlflow.start_run():
         model=model,
         draws=1000,
         chains=4,
+        random_seed=42,
         callback=callback,  # Log during sampling
     )
 ```
@@ -408,9 +418,19 @@ with pm.Model() as model:
 with mlflow.start_run():
     mlflow.set_tag("run_type", "production")
     mlflow.set_tag("mock_fit", "false")
+    mlflow.log_param("random_seed", 42)
     
     # Use model= parameter to avoid nested context
-    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4)
+    idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4, random_seed=42)
+    
+    # ============================================
+    # CHECK FOR SAMPLING ISSUES (log immediately)
+    # ============================================
+    n_divergences = idata.sample_stats["diverging"].sum().item()
+    mlflow.log_metric("n_divergences", n_divergences)
+    
+    if n_divergences > 0:
+        mlflow.set_tag("warning", f"Found {n_divergences} divergences")
     
     # ============================================
     # CUSTOM ARTIFACTS
@@ -461,6 +481,7 @@ with mlflow.start_run():
     # Convergence metrics (already logged by autolog, but can access directly)
     summary = az.summary(idata)
     mlflow.log_metric("min_ess_bulk", summary["ess_bulk"].min())
+    mlflow.log_metric("min_ess_tail", summary["ess_tail"].min())
     mlflow.log_metric("max_rhat", summary["r_hat"].max())
 ```
 
@@ -571,18 +592,21 @@ idata = az.from_netcdf(artifact_uri)
 
 ### Computing log_likelihood for Model Comparison
 
-**Important**: No PyMC sampler automatically computes `log_likelihood`—it's computationally expensive and not always needed. If you need LOO-CV or WAIC for model comparison, you must explicitly compute it:
+**Important**: No PyMC sampler automatically computes `log_likelihood`—it's computationally expensive and not always needed. This applies to **all samplers** (nutpie, numpyro, default NUTS, etc.). 
+
+If you need LOO-CV or WAIC for model comparison, you must explicitly compute it after sampling:
 
 ```python
 import pymc as pm
 
-idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4)
+idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4, random_seed=42)
 
 # Compute log_likelihood after sampling (required for LOO-CV/WAIC)
 pm.compute_log_likelihood(idata, model=model)
 
 # Now LOO-CV will work
 loo = az.loo(idata)
+mlflow.log_metric("elpd_loo", loo.elpd_loo)
 ```
 
 This applies to all samplers (nutpie, numpyro, default NUTS, etc.).
@@ -637,7 +661,11 @@ with mlflow.start_run():
     # FIT MODEL
     # ============================================
     # autolog captures sampling diagnostics, InferenceData, etc.
-    idata = mmm.fit(X, y, draws=1000, chains=4, nuts_sampler="nutpie")
+    idata = mmm.fit(X, y, draws=1000, chains=4, nuts_sampler="nutpie", random_seed=42)
+    
+    # Check for sampling issues
+    n_divergences = idata.sample_stats["diverging"].sum().item()
+    mlflow.log_metric("n_divergences", n_divergences)
     
     # ============================================
     # MMM-SPECIFIC ARTIFACTS
@@ -751,9 +779,10 @@ with mlflow.start_run():
     mlflow.set_tag("fit_method", fit_method)
     
     if fit_method == "MCMC":
-        model.fit(draws=1000, chains=4, nuts_sampler="nutpie")
+        model.fit(draws=1000, chains=4, nuts_sampler="nutpie", random_seed=42)
         mlflow.log_param("draws", 1000)
         mlflow.log_param("chains", 4)
+        mlflow.log_param("random_seed", 42)
     else:
         model.fit(fit_method="map")
     
@@ -844,6 +873,10 @@ artifact_path = mlflow.artifacts.download_artifacts(
 import arviz as az
 idata_best = az.from_netcdf(artifact_path)
 
+# If you need LOO-CV for model comparison, compute log_likelihood first
+# (no sampler computes it automatically)
+# pm.compute_log_likelihood(idata_best, model=model)
+
 # Compare specific artifacts across runs
 for idx, row in runs.head(3).iterrows():
     run_id = row["run_id"]
@@ -895,13 +928,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 **Problem**: LOO-CV or WAIC fails because `log_likelihood` group is missing.
 
-**Cause**: No PyMC sampler computes `log_likelihood` automatically—it's computationally expensive and not always needed.
+**Cause**: No PyMC sampler computes `log_likelihood` automatically—it's computationally expensive and not always needed. This applies to all samplers (nutpie, numpyro, default NUTS).
 
 **Solution**: Explicitly compute log_likelihood after sampling if you need it for model comparison:
 ```python
 import pymc as pm
 
-idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4)
+idata = pm.sample(model=model, nuts_sampler="nutpie", draws=1000, chains=4, random_seed=42)
 
 # Compute log_likelihood only if needed for LOO/WAIC
 pm.compute_log_likelihood(idata, model=model)
@@ -1002,7 +1035,8 @@ with pm.Model() as model:
 
 with mlflow.start_run():
     mlflow.set_tag("run_type", "production")
-    idata = pm.sample(model=model, nuts_sampler="nutpie")
+    mlflow.log_param("random_seed", 42)
+    idata = pm.sample(model=model, nuts_sampler="nutpie", random_seed=42)
     pm.sample_posterior_predictive(idata, model=model, extend_inferencedata=True)
 ```
 
@@ -1014,7 +1048,7 @@ with mlflow.start_run():
         obs = pm.Normal("obs", mu=mu, sigma=1, observed=data)
         
         # Don't need another 'with model:' - just use model= parameter!
-        idata = pm.sample(model=model, nuts_sampler="nutpie")
+        idata = pm.sample(model=model, nuts_sampler="nutpie", random_seed=42)
 ```
 
 ### Option 2: Extract Model Definition to Functions
@@ -1050,7 +1084,8 @@ for likelihood in ["normal", "student_t"]:
     
     with mlflow.start_run(run_name=f"{likelihood}_model"):
         mlflow.log_param("likelihood", likelihood)
-        idata = pm.sample(model=model, nuts_sampler="nutpie")
+        mlflow.log_param("random_seed", 42)
+        idata = pm.sample(model=model, nuts_sampler="nutpie", random_seed=42)
 ```
 
 **Benefits**:
@@ -1068,11 +1103,13 @@ for likelihood in ["normal", "student_t"]:
 - [ ] Tag `run_type` (`"test"` or `"production"`)
 - [ ] Tag `mock_fit` if using fast iteration
 - [ ] Log sample counts: `draws`, `chains`, `total_samples`
+- [ ] Log `random_seed` for reproducibility
 - [ ] Log model configuration: `likelihood`, `sampler`, `n_parameters`
 - [ ] Consider enabling system metrics (`log_system_metrics=True`) for long runs or GPU samplers
 
 ### After Sampling
 
+- [ ] Check and log divergence count (`idata.sample_stats["diverging"].sum()`)
 - [ ] Log agreed-upon comparison metrics (LOO, MAE, domain-specific)
 - [ ] Log key diagnostic plots (PPC, trace, posterior distributions)
 - [ ] Save InferenceData with consistent name (`idata.nc`)
@@ -1082,7 +1119,8 @@ for likelihood in ["normal", "student_t"]:
 
 - [ ] Ensure `total_samples >= 2000` (or your threshold)
 - [ ] Verify `mock_fit = "false"`
-- [ ] Check convergence: `r_hat < 1.01`, `ess_bulk > 400`
+- [ ] Check convergence: `r_hat < 1.01`, `ess_bulk > 400`, `ess_tail > 400` (total across chains)
+- [ ] Verify `n_divergences = 0` (or near zero)
 - [ ] Include model serialization artifacts if using PyMC-Marketing
 - [ ] Tag with domain-specific metadata (`model_type`, `adstock`, etc.)
 
