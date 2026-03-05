@@ -548,6 +548,35 @@ with model:
 # Not just the training data range
 ```
 
+### Label Switching in Mixture Models
+
+Unordered mixture components cause label switching — the sampler swaps component identities between iterations, producing meaningless per-component summaries.
+
+```python
+# BAD: Unordered components
+mu = pm.Normal("mu", 0, 10, dims="component")
+
+# FIX: Order constraint
+mu = pm.Normal("mu", 0, 10, dims="component",
+               transform=pm.distributions.transforms.ordered,
+               initval=np.linspace(y_obs.min(), y_obs.max(), K))
+```
+
+See [mixtures.md](mixtures.md) for detailed solutions.
+
+### Missing Prior Predictive Checks
+
+Always check prior implications before fitting:
+
+```python
+with model:
+    prior_pred = pm.sample_prior_predictive()
+
+az.plot_ppc(prior_pred, group="prior")
+```
+
+If prior predictive range is implausible (negative counts, probabilities > 1, extreme values), adjust priors before proceeding.
+
 ### The Horseshoe Prior Challenge
 
 Horseshoe priors have a massive spike at zero and heavy tails, creating a "double-funnel" geometry.
@@ -585,9 +614,310 @@ with pm.Model() as correct:
 
 ---
 
+## PyMC API Issues
+
+### Variable Name Same as Dimension Label
+
+PyMC v5+ does not allow a variable to have the same name as its dimension label. This causes a `ValueError` at model creation.
+
+```python
+# ERROR: Variable `cohort` has the same name as its dimension label
+coords = {"cohort": cohorts, "year": years}
+with pm.Model(coords=coords) as model:
+    cohort = rw2_fn("cohort", n_cohorts, sigma_c, dims="cohort")  # ValueError!
+
+# FIX: Use different names for dimension labels
+coords = {"cohort_idx": cohorts, "year_idx": years}
+with pm.Model(coords=coords) as model:
+    cohort = rw2_fn("cohort", n_cohorts, sigma_c, dims="cohort_idx")  # OK
+    period = rw2_fn("period", n_years, sigma_t, dims="year_idx")  # OK
+```
+
+### ArviZ plot_ppc Parameter Names
+
+ArviZ's `plot_ppc()` function does not accept `num_pp_samples` parameter. This parameter was removed in recent versions.
+
+```python
+# ERROR: Unexpected keyword argument
+az.plot_ppc(idata, kind="cumulative", num_pp_samples=100)  # TypeError
+
+# FIX: Remove num_pp_samples parameter
+az.plot_ppc(idata, kind="cumulative")  # OK
+
+# Subset to fewer draws if needed
+idata_subset = idata.sel(draw=slice(0, 100))
+az.plot_ppc(idata_subset, kind="cumulative")
+```
+
+### pm.MutableData / pm.ConstantData Deprecation
+
+`pm.MutableData` and `pm.ConstantData` are deprecated in PyMC v5+. Use `pm.Data` instead, which is mutable by default.
+
+```python
+# DEPRECATED
+x = pm.MutableData("x", x_obs)
+c = pm.ConstantData("c", constants)
+
+# CURRENT
+x = pm.Data("x", x_obs)           # mutable by default
+c = pm.Data("c", constants)       # use pm.Data for constants too
+```
+
+---
+
+## Performance Issues
+
+### Full GP on Large Datasets
+
+```python
+# O(n³) - slow for n > 1000
+gp = pm.gp.Marginal(cov_func=cov)
+y = gp.marginal_likelihood("y", X=X_large, y=y_obs)
+
+# O(nm) - use HSGP instead
+gp = pm.gp.HSGP(m=[30], c=1.5, cov_func=cov)
+f = gp.prior("f", X=X_large)
+```
+
+### Saving Large Deterministics
+
+```python
+# Stores n_obs x n_draws array
+mu = pm.Deterministic("mu", X @ beta, dims="obs")  # SLOW
+
+# Don't save intermediate computations
+mu = X @ beta  # Not saved, use posterior_predictive if needed
+```
+
+### Recompiling for Each Dataset
+
+```python
+# Recompiles every iteration
+for dataset in datasets:
+    with pm.Model() as model:
+        # ...
+        idata = pm.sample()
+
+# Use pm.Data to avoid recompilation
+with pm.Model() as model:
+    x = pm.Data("x", x_initial)
+    # ...
+
+for dataset in datasets:
+    pm.set_data({"x": dataset["x"]})
+    idata = pm.sample()
+```
+
+### Profiling Slow Models
+
+```python
+# Time individual operations in the log-probability computation
+profile = model.profile(model.logp())
+profile.summary()
+
+# Identify bottlenecks in gradient computation
+import pytensor
+grad_profile = model.profile(pytensor.grad(model.logp(), model.continuous_value_vars))
+grad_profile.summary()
+```
+
+---
+
+## Identifiability Issues
+
+### Symptoms
+
+- Strong parameter correlations in pair plots
+- Very wide posteriors despite lots of data
+- Different chains converging to different solutions
+- R-hat > 1.01 despite long chains
+
+### Common Causes
+
+**Overparameterized models**: More parameters than the data can support.
+
+```python
+# Too many group-level effects for small groups
+alpha_group = pm.Normal("alpha_group", 0, 1, dims="group")  # 100 groups, 3 obs each
+beta_group = pm.Normal("beta_group", 0, 1, dims="group")    # Can't estimate both
+```
+
+**Multicollinearity**: Correlated predictors make individual effects unidentifiable.
+
+**Redundant random effects**: Nested effects without constraints.
+
+### Fixes
+
+**Sum-to-zero constraints** for categorical effects:
+
+```python
+import pytensor.tensor as pt
+
+# Constrain group effects to sum to zero
+alpha_raw = pm.Normal("alpha_raw", 0, 1, shape=n_groups - 1)
+alpha = pm.Deterministic("alpha", pt.concatenate([alpha_raw, -alpha_raw.sum(keepdims=True)]))
+```
+
+**QR decomposition** for regression with correlated predictors:
+
+```python
+# Orthogonalize design matrix
+Q, R = np.linalg.qr(X)
+
+with pm.Model() as qr_model:
+    beta_tilde = pm.Normal("beta_tilde", 0, 1, dims="features")
+    beta = pm.Deterministic("beta", pt.linalg.solve(R, beta_tilde))
+    mu = Q @ beta_tilde  # Use Q directly in likelihood
+```
+
+**Reduce model complexity**: Start simple, add complexity only if needed.
+
+### Diagnosis
+
+```python
+# Check for strong correlations
+az.plot_pair(idata, var_names=["alpha", "beta"], divergences=True)
+
+# Look for banana-shaped or ridge-like posteriors
+# These indicate non-identifiability
+```
+
+---
+
+## Prior-Data Conflict
+
+### Symptoms
+
+- Posterior piled against prior boundary
+- Prior and posterior distributions look very different
+- Divergences concentrated near prior boundaries
+- Effective sample size very low for some parameters
+
+### Diagnosis
+
+```python
+# Compare prior and posterior
+az.plot_dist_comparison(idata, var_names=["sigma"])
+
+# Visual comparison for all parameters
+fig, axes = plt.subplots(1, len(param_names), figsize=(4*len(param_names), 3))
+for ax, var in zip(axes, param_names):
+    az.plot_density(idata.prior, var_names=[var], ax=ax, colors="C0", label="Prior")
+    az.plot_density(idata.posterior, var_names=[var], ax=ax, colors="C1", label="Posterior")
+    ax.set_title(var)
+```
+
+### Common Scenarios
+
+**Prior too narrow**: Data suggests values outside prior range.
+
+```python
+# Prior rules out likely values
+sigma = pm.HalfNormal("sigma", sigma=0.1)  # If true sigma is ~5, this fights the data
+
+# Fix: Use domain knowledge, not convenience
+sigma = pm.HalfNormal("sigma", sigma=5)  # Allow for larger values
+```
+
+**Prior on wrong scale**: Common when using default priors without checking.
+
+```python
+# Default prior on standardized scale
+beta = pm.Normal("beta", 0, 1)  # Fine if X is standardized
+
+# But if X ranges from 10000 to 50000...
+# Standardize predictors or adjust prior
+X_scaled = (X - X.mean()) / X.std()
+```
+
+### Resolution
+
+1. Check data for errors (outliers, coding mistakes)
+2. Reconsider prior based on domain knowledge
+3. Use prior predictive checks to validate
+4. If justified, use more flexible prior
+
+---
+
+## Multicollinearity
+
+### The Problem
+
+Correlated predictors make individual coefficient estimates unstable, even though predictions remain valid.
+
+### Detection
+
+```python
+import numpy as np
+
+# Condition number (>30 suggests problems)
+condition_number = np.linalg.cond(X)
+print(f"Condition number: {condition_number:.1f}")
+
+# Correlation matrix
+import pandas as pd
+corr = pd.DataFrame(X, columns=feature_names).corr()
+print(corr)
+
+# Variance inflation factors (VIF)
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+vif_data = pd.DataFrame()
+vif_data["feature"] = feature_names
+vif_data["VIF"] = [variance_inflation_factor(X, i) for i in range(X.shape[1])]
+print(vif_data)  # VIF > 5-10 indicates multicollinearity
+```
+
+### Symptoms in Posteriors
+
+```python
+# Strong negative correlation between coefficients
+az.plot_pair(idata, var_names=["beta"])
+# Look for elongated ellipses or banana shapes
+
+# Wide credible intervals despite large N
+summary = az.summary(idata, var_names=["beta"])
+print(summary[["mean", "sd", "hdi_3%", "hdi_97%"]])
+```
+
+### Solutions
+
+**Drop redundant predictors**:
+
+```python
+# If age and birth_year are both included, drop one
+X = X[:, [i for i, name in enumerate(feature_names) if name != "birth_year"]]
+```
+
+**Use regularizing priors**:
+
+```python
+# Ridge-like prior (shrinks toward zero)
+beta = pm.Normal("beta", mu=0, sigma=0.5, dims="features")
+
+# Horseshoe prior (sparse, some coefficients near zero)
+# See priors.md for full code
+```
+
+**QR parameterization** (orthogonalizes predictors):
+
+```python
+Q, R = np.linalg.qr(X)
+R_inv = np.linalg.inv(R)
+
+with pm.Model() as model:
+    theta = pm.Normal("theta", 0, 1, dims="features")
+    beta = pm.Deterministic("beta", pt.dot(R_inv, theta))
+    mu = pt.dot(Q, theta)
+    y = pm.Normal("y", mu=mu, sigma=sigma, observed=y_obs)
+```
+
+**Interpret carefully**: If prediction is the goal, multicollinearity may not matter—just don't interpret individual coefficients.
+
+---
+
 ## See Also
 
 - [diagnostics.md](diagnostics.md) - Post-sampling diagnostic workflow
-- [gotchas.md](gotchas.md) - Statistical and performance pitfalls
 - [priors.md](priors.md) - Prior selection guidance
 - [inference.md](inference.md) - Sampler selection and configuration

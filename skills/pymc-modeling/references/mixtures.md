@@ -298,4 +298,4 @@ print(summary[["mean", "hdi_3%", "hdi_97%"]])
 
 - [priors.md](priors.md) - Prior selection for mixture components
 - [diagnostics.md](diagnostics.md) - General convergence diagnostics
-- [gotchas.md](gotchas.md) - Common modeling pitfalls
+- [troubleshooting.md](troubleshooting.md) - Common modeling pitfalls

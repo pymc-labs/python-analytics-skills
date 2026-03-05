@@ -342,8 +342,9 @@ az.plot_ppc(idata, kind="cumulative")
 # Scatter plot (for continuous outcomes)
 az.plot_ppc(idata, kind="scatter")
 
-# Subsample for speed
-az.plot_ppc(idata, num_pp_samples=100)
+# Subset draws if needed for speed
+idata_subset = idata.sel(draw=slice(0, 100))
+az.plot_ppc(idata_subset, kind="cumulative")
 ```
 
 **What to look for (density/KDE):**
@@ -795,7 +796,7 @@ az.plot_trace(idata, var_names=["theta"], compact=False)
 az.plot_pair(idata, var_names=["mu_group", "sigma_group"], divergences=True)
 ```
 
-**Fix:** Use non-centered parameterization (see [gotchas.md](gotchas.md))
+**Fix:** Use non-centered parameterization (see [troubleshooting.md](troubleshooting.md))
 
 ### Pattern: Poor Tail Sampling
 
