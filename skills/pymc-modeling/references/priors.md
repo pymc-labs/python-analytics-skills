@@ -372,64 +372,7 @@ if abs(prior_mean - posterior_mean) > 3 * posterior_sd:
 
 ## Expert Elicitation
 
-When data is scarce (rare diseases, novel phenomena), priors must be constructed through formal elicitation.
-
-### SHELF Framework
-
-The Sheffield Elicitation Framework (SHELF) guides experts to translate beliefs into distributions:
-
-1. **Define the quantity clearly** (what exactly are we eliciting?)
-2. **Establish plausible range** (minimum, maximum)
-3. **Elicit central tendency** (median or mode)
-4. **Elicit uncertainty** (quartiles or probability intervals)
-5. **Fit distribution** to elicited quantities
-
-### Roulette Method
-
-Often more intuitive than direct percentile elicitation:
-
-```python
-# Example: expert places "chips" into bins
-bins = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-chips = [0, 1, 3, 5, 8, 10, 8, 5, 3, 1, 0]  # expert allocation
-
-# Normalize to probability and fit Beta
-import numpy as np
-from scipy import stats
-
-probs = np.array(chips) / sum(chips)
-bin_centers = (np.array(bins[:-1]) + np.array(bins[1:])) / 2
-mean = np.sum(probs * bin_centers)
-var = np.sum(probs * (bin_centers - mean)**2)
-
-# Fit Beta distribution
-alpha = mean * (mean * (1 - mean) / var - 1)
-beta_param = (1 - mean) * (mean * (1 - mean) / var - 1)
-print(f"Elicited prior: Beta({alpha:.2f}, {beta_param:.2f})")
-```
-
-### Aggregating Multiple Experts
-
-```python
-# Simple mathematical pooling (weighted average)
-expert_params = [
-    (2, 5),   # Expert 1: Beta(2, 5)
-    (3, 4),   # Expert 2: Beta(3, 4)
-    (2, 3),   # Expert 3: Beta(2, 3)
-]
-weights = [0.4, 0.3, 0.3]  # based on expertise
-
-# Linear pool (mixture of distributions)
-# In PyMC, can use Mixture distribution
-alphas = [p[0] for p in expert_params]
-betas = [p[1] for p in expert_params]
-
-p = pm.Mixture(
-    "p",
-    w=weights,
-    comp_dists=[pm.Beta.dist(alpha=a, beta=b) for a, b in zip(alphas, betas)]
-)
-```
+When data is scarce (rare diseases, novel phenomena), priors must be constructed through formal elicitation. For formal elicitation protocols (SHELF framework, roulette method, expert aggregation), consult domain-specific elicitation literature such as O'Hagan et al. (2006) *Uncertain Judgements: Eliciting Experts' Probabilities*.
 
 ## Practical Implementation Guidelines
 

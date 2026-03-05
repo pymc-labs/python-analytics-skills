@@ -12,20 +12,7 @@ Quick reference for post-sampling diagnostics and common issues. For comprehensi
 
 ---
 
-## Quick Symptom Reference
-
-| Symptom | Primary Cause | Solution |
-|---------|---------------|----------|
-| `ValueError: Shape mismatch` | Parameter vs observation dimensions | Index into group params: `alpha[group_idx]` |
-| `Initial evaluation failed: -inf` | Data outside distribution support | Check bounds; reduce jitter; use `init="adapt_diag"` |
-| `Mass matrix contains zeros` | Unscaled features or flat priors | Standardize predictors; use weakly informative priors |
-| High divergence count | Funnel geometry or hard boundaries | Non-centered parameterization; increase `target_accept` |
-| Poor GP convergence | Inappropriate lengthscale prior | InverseGamma prior based on data scale |
-| `TypeError` in model logic | Python `if/else` inside model | Use `pt.switch()` or `pytensor.ifelse` |
-| Slow sampling with discrete vars | NUTS incompatible with discrete | Marginalize discrete variables |
-| Inconsistent predictions | Different group factorization | Use `pd.Categorical` or `sort=True` in factorize |
-
----
+For model-building errors (shape mismatches, initialization failures, API issues), see [troubleshooting.md](troubleshooting.md).
 
 ## Quick Diagnostic Checklist
 
@@ -269,33 +256,13 @@ print(f"Problematic observations: {bad_idx}")
 
 ### Computing Log-Likelihood with nutpie
 
-**Critical**: With nutpie sampler, log-likelihood is NOT stored automatically. You must compute it explicitly after sampling for LOO-CV and LOO-PIT to work.
+nutpie does not store log-likelihood automatically (it silently ignores `idata_kwargs`). Compute it explicitly after sampling. See SKILL.md § Inference for details.
 
-```python
-# After sampling with nutpie
-with model:
-    idata = pm.sample(nuts_sampler="nutpie", draws=1000, tune=1000)
-
-# ERROR: log_likelihood not found
-loo = az.loo(idata)  # TypeError: log likelihood not found
-
-# FIX: Compute log-likelihood explicitly
-with model:
-    pm.compute_log_likelihood(idata)
-
-# Now LOO-CV works
-loo = az.loo(idata, pointwise=True)
-az.plot_loo_pit(idata, y="y")
-```
-
-**Best practice**: Always compute log-likelihood after sampling with nutpie:
 ```python
 with model:
     idata = pm.sample(nuts_sampler="nutpie", ...)
     pm.compute_log_likelihood(idata)  # Required for LOO-CV
 ```
-
-**Note**: PyMC's native NUTS sampler stores log-likelihood automatically, but nutpie does not.
 
 ### plot_khat Requires LOO Object
 
@@ -373,6 +340,5 @@ waic = az.waic(idata)
 
 - [troubleshooting.md](troubleshooting.md) - Comprehensive problem-solution guide
 - [arviz.md](arviz.md) - Comprehensive ArviZ usage guide
-- [gotchas.md](gotchas.md) - Common modeling pitfalls
 - [inference.md](inference.md) - Sampler selection and configuration
 - [priors.md](priors.md) - Prior selection guide

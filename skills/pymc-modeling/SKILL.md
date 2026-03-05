@@ -11,13 +11,7 @@ description: >
 
 # PyMC Modeling
 
-Bayesian modeling workflow for PyMC v5+ with modern API patterns.
-
-Claude understands the fundamentals of Bayesian inference—priors, likelihoods, posterior distributions, and Bayes' theorem. It knows MCMC is the standard approach for posterior sampling and can explain what a hierarchical model is. But getting from these concepts to a correctly-specified, well-diagnosed, and efficiently-sampled PyMC model requires domain-specific knowledge that changes over time.
-
-This skill bridges that gap. It encodes modern best practices like using nutpie as the default sampler because it runs two to five times faster than the default NUTS implementation, choosing non-centered parameterization for hierarchical models to avoid pathological geometry, and reaching for HSGP instead of exact Gaussian processes for any dataset larger than a few hundred points. It covers the common pitfalls you will actually hit—why you are getting divergences and how to fix them, the specific error messages that indicate a shape mismatch or initialization failure, and when the centered parameterization actually performs better despite the folklore. It also details the correct API usage: how to structure coords and dims for readable InferenceData, why nutpie silently ignores log_likelihood requests and what to do about it, and the proper workflow for saving results to NetCDF.
-
-Without this skill, Claude might suggest outdated defaults like the slow default NUTS sampler, miss critical diagnostics such as ESS and r_hat checks, or recommend inefficient parameterizations that lead to divergences. With it, you get concise, battle-tested patterns that actually work in practice.
+Modern Bayesian modeling with PyMC v5+. Key defaults: nutpie sampler (2-5x faster), non-centered parameterization for hierarchical models, HSGP over exact GPs, coords/dims for readable InferenceData, and save-early workflow to prevent data loss from late crashes.
 
 **Modeling strategy**: Build models iteratively — start simple, check prior
 predictions, fit and diagnose, check posterior predictions, expand one piece at
@@ -80,8 +74,6 @@ alpha = pm.Normal("alpha", mu_alpha, sigma_alpha, dims="group")
 
 ### Default Sampling (nutpie preferred)
 
-Prefer nutpie for sampling — it is Rust-based and typically 2-5x faster than PyMC's default NUTS. It supports most standard PyMC models including time series, GPs, mixtures, and custom likelihoods:
-
 ```python
 with model:
     idata = pm.sample(
@@ -100,26 +92,15 @@ pm.compute_log_likelihood(idata, model=model)
 
 ### When to Use PyMC's Default NUTS Instead
 
-**Model correctness takes precedence over sampler speed.** nutpie's numba backend cannot handle models with discrete parameters or certain transforms (e.g., the `ordered` transform used with `OrderedLogistic`/`OrderedProbit`). If your model uses discrete variables or these transforms, omit `nuts_sampler="nutpie"` and use PyMC's default NUTS:
+nutpie cannot handle discrete parameters or certain transforms (e.g., `ordered` transform with `OrderedLogistic`/`OrderedProbit`). For these models, omit `nuts_sampler="nutpie"`:
 
 ```python
-# Models with discrete params or ordered transforms: use default NUTS
 idata = pm.sample(draws=1000, tune=1000, chains=4, random_seed=42)
 ```
 
-Do not work around sampler incompatibilities by changing the model specification. Use the correct statistical model and let the sampler adapt.
+Never change the model specification to work around sampler limitations.
 
-### If nutpie Is Not Installed
-
-Use `nuts_sampler="nutpie"` or `nuts_sampler="numpyro"` when the model supports it. If neither is installed, install before sampling:
-
-```python
-import subprocess, sys
-try:
-    import nutpie
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "nutpie"])
-```
+If nutpie is not installed, install it (`pip install nutpie`) or fall back to `nuts_sampler="numpyro"`.
 
 ### Alternative MCMC Backends
 
@@ -219,18 +200,12 @@ Always check prior implications before fitting:
 with model:
     prior_pred = pm.sample_prior_predictive(draws=500)
 
-# Do prior predictions span reasonable outcome range?
 az.plot_ppc(prior_pred, group="prior", kind="cumulative")
-
-# Numerical sanity check
 prior_y = prior_pred.prior_predictive["y"].values.flatten()
 print(f"Prior predictive range: [{prior_y.min():.1f}, {prior_y.max():.1f}]")
 ```
 
-**Warning signs**: Prior predictive covers implausible values (negative counts, probabilities > 1) or is extremely wide/narrow.
-
-**Rule**: Run prior predictive checks before `pm.sample()` on any new model.
-If the range is unreasonable, adjust priors and re-check before proceeding.
+**Rule**: Run prior predictive checks before `pm.sample()` on any new model. If the range is implausible (negative counts, probabilities > 1), adjust priors before proceeding.
 
 ### Posterior Predictive (After Fitting)
 
@@ -238,42 +213,15 @@ If the range is unreasonable, adjust priors and re-check before proceeding.
 with model:
     pm.sample_posterior_predictive(idata, extend_inferencedata=True)
 
-# Density comparison
-az.plot_ppc(idata, kind="kde")
-
-# Cumulative (better for systematic deviations)
 az.plot_ppc(idata, kind="cumulative")
-
-# Calibration diagnostic
 az.plot_loo_pit(idata, y="y")
 ```
 
-**Interpretation**: Observed data (dark line) should fall within posterior predictive distribution (light lines). See [references/arviz.md](references/arviz.md) for detailed interpretation.
+Observed data (dark line) should fall within posterior predictive distribution. See [references/arviz.md](references/arviz.md) for detailed interpretation.
 
 ## Model Debugging
 
-### Inspecting Model Structure
-
-```python
-# Print model summary (variables, shapes, distributions)
-print(model)
-
-# Visualize model as directed graph
-pm.model_to_graphviz(model)
-```
-
-### Checking for Specification Errors
-
-Before sampling, validate the model:
-
-```python
-# Debug model: checks for common issues
-model.debug()
-
-# Check initial point log-probabilities
-# Identifies which variables have invalid starting values
-model.point_logps()
-```
+Before sampling, validate the model with `model.debug()` and `model.point_logps()`. Use `print(model)` for structure and `pm.model_to_graphviz(model)` for a DAG visualization.
 
 ### Common Issues
 
@@ -289,30 +237,9 @@ model.point_logps()
 
 See [references/troubleshooting.md](references/troubleshooting.md) for comprehensive problem-solution guide.
 
-### Debugging Divergences
+For debugging divergences, use `az.plot_pair(idata, divergences=True)` to locate clusters. See [references/diagnostics.md](references/diagnostics.md) § Divergence Troubleshooting.
 
-```python
-# Identify where divergences occur in parameter space
-az.plot_pair(idata, var_names=["alpha", "beta", "sigma"], divergences=True)
-
-# Check if divergences cluster in specific regions
-# Clustering suggests parameterization or prior issues
-```
-
-### Profiling Slow Models
-
-```python
-# Time individual operations in the log-probability computation
-profile = model.profile(model.logp())
-profile.summary()
-
-# Identify bottlenecks in gradient computation
-import pytensor
-grad_profile = model.profile(pytensor.grad(model.logp(), model.continuous_value_vars))
-grad_profile.summary()
-```
-
-See [references/gotchas.md](references/gotchas.md) for additional troubleshooting.
+For profiling slow models, see [references/troubleshooting.md](references/troubleshooting.md) § Performance Issues.
 
 ## Model Comparison
 
@@ -369,49 +296,18 @@ idata.to_netcdf("results/model_v1.nc")
 idata = az.from_netcdf("results/model_v1.nc")
 ```
 
-### Compressed Storage
+For compressed storage of large InferenceData objects, see [references/workflow.md](references/workflow.md).
 
-For large InferenceData objects (many draws, large posterior predictive):
-
-```python
-# Compress with zlib (reduces file size 50-80%)
-idata.to_netcdf(
-    "results/model_v1.nc",
-    engine="h5netcdf",
-    encoding={var: {"zlib": True, "complevel": 4}
-              for group in ["posterior", "posterior_predictive"]
-              if hasattr(idata, group)
-              for var in getattr(idata, group).data_vars}
-)
-```
-
-### What Gets Saved
-
-InferenceData preserves the full Bayesian workflow:
-- `posterior`: Parameter samples from MCMC
-- `prior`, `prior_predictive`: Prior samples (if generated)
-- `posterior_predictive`: Predictions (if generated)
-- `observed_data`, `constant_data`: Data used in fitting
-- `sample_stats`: Diagnostics (divergences, tree depth, energy)
-- `log_likelihood`: Pointwise log-likelihood (for LOO-CV)
-- All coordinates and dimensions
-
-### Workflow Pattern
+**Critical**: Save IMMEDIATELY after sampling — late crashes destroy valid results:
 
 ```python
-# Save IMMEDIATELY after sampling — late crashes (post-MCMC) destroy valid results
 with model:
     idata = pm.sample(nuts_sampler="nutpie")
 idata.to_netcdf("results.nc")  # Save before any post-processing!
 
-# Then do posterior predictive, diagnostics, etc.
 with model:
     pm.sample_posterior_predictive(idata, extend_inferencedata=True)
 idata.to_netcdf("results.nc")  # Update with posterior predictive
-
-# Resume later
-idata = az.from_netcdf("results.nc")
-az.plot_ppc(idata)  # Continue analysis
 ```
 
 ## Prior Selection
@@ -444,20 +340,15 @@ with pm.Model(coords={"group": groups, "obs": obs_idx}) as hierarchical:
 ```python
 # Logistic regression
 with pm.Model() as logistic:
-    alpha = pm.Normal("alpha", 0, 2.5)  # intercept
+    alpha = pm.Normal("alpha", 0, 2.5)
     beta = pm.Normal("beta", 0, 2.5, dims="features")
-    
-    # Logit link
-    logit_p = alpha + pm.math.dot(X, beta)
-    p = pm.math.sigmoid(logit_p)
-    
+    p = pm.math.sigmoid(alpha + pm.math.dot(X, beta))
     y = pm.Bernoulli("y", p=p, observed=y_obs)
 
 # Poisson regression
 with pm.Model() as poisson:
     beta = pm.Normal("beta", 0, 1, dims="features")
-    mu = pm.math.exp(pm.math.dot(X, beta))
-    y = pm.Poisson("y", mu=mu, observed=y_obs)
+    y = pm.Poisson("y", mu=pm.math.exp(pm.math.dot(X, beta)), observed=y_obs)
 ```
 
 ### Gaussian Processes
@@ -484,12 +375,7 @@ with pm.Model() as gp_model:
 
 For periodic patterns, use `pm.gp.HSGPPeriodic`. Only use `pm.gp.Marginal` or `pm.gp.Latent` for very small datasets (n < ~50) where exact inference is specifically needed.
 
-See [references/gp.md](references/gp.md) for:
-- **HSGP parameter selection** (choosing m and c, automatic heuristics)
-- **HSGPPeriodic** for seasonal/cyclic patterns
-- Approximation quality diagnostics
-- Covariance functions and priors
-- Common patterns (trend + seasonality, classification, heteroscedastic)
+See [references/gp.md](references/gp.md) for HSGP parameter selection (m, c), HSGPPeriodic, covariance functions, and common patterns.
 
 ### Time Series
 
@@ -502,14 +388,7 @@ with pm.Model(coords={"time": range(T)}) as ar_model:
               observed=y_obs, dims="time")
 ```
 
-See [references/timeseries.md](references/timeseries.md) for:
-- Autoregressive models (AR, ARMA)
-- Random walk and local level models
-- Structural time series (trend + seasonality)
-- State space models
-- GPs for time series
-- Handling multiple seasonalities
-- Forecasting patterns
+See [references/timeseries.md](references/timeseries.md) for AR/ARMA, random walks, structural time series, state space models, and forecasting patterns.
 
 ### BART (Bayesian Additive Regression Trees)
 
@@ -522,11 +401,7 @@ with pm.Model() as bart_model:
     y_obs = pm.Normal("y_obs", mu=mu, sigma=sigma, observed=y)
 ```
 
-See [references/bart.md](references/bart.md) for:
-- Regression and classification
-- Variable importance and partial dependence
-- Combining BART with parametric components
-- Configuration (number of trees, depth priors)
+See [references/bart.md](references/bart.md) for regression/classification, variable importance, and configuration.
 
 ### Mixture Models
 
@@ -551,39 +426,13 @@ with pm.Model(coords=coords) as gmm:
 
 **Important**: Mixture models often need `target_accept=0.9` or higher to avoid divergences from the multimodal geometry. Always provide `initval` on ordered means — without it, components can start overlapping and the sampler struggles to separate them.
 
-See [references/mixtures.md](references/mixtures.md) for:
-- Finite mixture models and mixture of regressions
-- Label switching problem and solutions (ordering constraints, relabeling)
-- Marginalized mixtures (pymc-extras)
-- Diagnostics for mixture models
+See [references/mixtures.md](references/mixtures.md) for label switching solutions, marginalized mixtures, and mixture diagnostics.
 
 ### Sparse Regression / Horseshoe
 
-Use the regularized (Finnish) horseshoe prior for high-dimensional regression with expected sparsity:
+Use the regularized (Finnish) horseshoe prior for high-dimensional regression with expected sparsity. Horseshoe priors create double-funnel geometry — use `target_accept=0.95` or higher.
 
-```python
-import pytensor.tensor as pt
-
-with pm.Model(coords={"features": feature_names}) as sparse_model:
-    # Regularized horseshoe (Piironen & Vehtari, 2017)
-    tau = pm.HalfStudentT("tau", nu=2, sigma=1)  # global shrinkage
-    lam = pm.HalfStudentT("lam", nu=5, dims="features")  # local shrinkage
-    c2 = pm.InverseGamma("c2", alpha=1, beta=1)  # slab variance
-    z = pm.Normal("z", 0, 1, dims="features")
-
-    # Regularized shrinkage factor
-    lam_tilde = pt.sqrt(c2 / (c2 + tau**2 * lam**2))
-    beta = pm.Deterministic("beta", z * tau * lam * lam_tilde, dims="features")
-
-    mu = pm.math.dot(X, beta)
-    y = pm.Normal("y", mu=mu, sigma=sigma, observed=y_obs)
-
-    idata = pm.sample(nuts_sampler="nutpie", target_accept=0.95)
-```
-
-**Important**: Horseshoe priors create double-funnel geometry. Use `target_accept=0.95` or higher to avoid divergences.
-
-See [references/priors.md](references/priors.md) for Laplace, R2D2, and spike-and-slab alternatives.
+See [references/priors.md](references/priors.md) for full regularized horseshoe code, Laplace, R2D2, and spike-and-slab alternatives.
 
 ### Specialized Likelihoods
 
@@ -613,116 +462,52 @@ with pm.Model() as ordinal:
 
 **Note**: Don't use the same name for a variable and a dimension. For example, if you have a dimension called `"cutpoints"`, don't also name a variable `"cutpoints"` — this causes shape errors.
 
-See [references/specialized_likelihoods.md](references/specialized_likelihoods.md) for:
-- Zero-inflated models (Poisson, Negative Binomial, Binomial)
-- Hurdle models for count data
-- Censored and truncated data
-- Ordinal regression
-- Robust regression with Student-t likelihood
+See [references/specialized_likelihoods.md](references/specialized_likelihoods.md) for zero-inflated, hurdle, censored/truncated, ordinal, and robust regression models.
 
 ## Common Pitfalls
 
-See [references/gotchas.md](references/gotchas.md) for:
-- Centered vs non-centered parameterization
-- Priors on scale parameters
-- Label switching in mixtures
-- Performance issues (GPs, large Deterministics)
-- Python conditionals and hard clipping
-- Redundant intercepts in hierarchical models
-
 See [references/troubleshooting.md](references/troubleshooting.md) for comprehensive problem-solution guide covering:
-- Shape and dimension errors
-- Initialization failures
-- Mass matrix and numerical issues
-- Discrete variable challenges
-- Data container and prediction issues
+- Shape and dimension errors, initialization failures, mass matrix issues
+- Divergences and geometry problems (centered vs non-centered)
+- PyMC API issues (variable naming, deprecated parameters)
+- Performance issues (GPs, large Deterministics, recompilation)
+- Identifiability, multicollinearity, prior-data conflict
+- Discrete variable challenges, data containers, prediction
 
 ## Causal Inference Operations
 
-### pm.do (Interventions)
-
-Apply do-calculus interventions to set variables to fixed values:
+PyMC supports do-calculus for causal queries:
 
 ```python
-with pm.Model() as causal_model:
-    x = pm.Normal("x", 0, 1)
-    y = pm.Normal("y", x, 1)
-    z = pm.Normal("z", y, 1)
-
-# Intervene: set x = 2 (breaks incoming edges to x)
+# pm.do — intervene (breaks incoming edges)
 with pm.do(causal_model, {"x": 2}) as intervention_model:
-    idata = pm.sample_prior_predictive()
-    # Samples from P(y, z | do(x=2))
-```
+    idata = pm.sample_prior_predictive()  # P(y, z | do(x=2))
 
-### pm.observe (Conditioning)
-
-Condition on observed values without intervention:
-
-```python
-# Condition: observe y = 1 (doesn't break causal structure)
+# pm.observe — condition (preserves causal structure)
 with pm.observe(causal_model, {"y": 1}) as conditioned_model:
-    idata = pm.sample(nuts_sampler="nutpie")
-    # Samples from P(x, z | y=1)
-```
+    idata = pm.sample(nuts_sampler="nutpie")  # P(x, z | y=1)
 
-### Combining do and observe
-
-```python
-# Intervention + observation for causal queries
+# Combine: P(y | do(x=2), z=0)
 with pm.do(causal_model, {"x": 2}) as m1:
     with pm.observe(m1, {"z": 0}) as m2:
         idata = pm.sample(nuts_sampler="nutpie")
-        # P(y | do(x=2), z=0)
 ```
+
+See [references/causal.md](references/causal.md) for detailed causal inference patterns.
 
 ## pymc-extras
 
-For specialized models and inference:
-
-```python
-import pymc_extras as pmx
-
-# Marginalize discrete parameters from a model
-model = pmx.marginalize(model, ["discrete_var"])
-
-# R2D2 prior for regression (requires output_sigma and input_sigma)
-residual_sigma, beta = pmx.R2D2M2CP(
-    "r2d2",
-    output_sigma=y.std(),
-    input_sigma=X.std(axis=0),
-    dims="features",
-    r2=0.5,
-)
-
-# Laplace approximation for fast inference
-idata = pmx.fit_laplace(model)
-```
+Key extensions via `import pymc_extras as pmx`:
+- `pmx.marginalize(model, ["discrete_var"])` — marginalize discrete parameters for NUTS
+- `pmx.R2D2M2CP(...)` — R2D2 prior for regression (see [references/priors.md](references/priors.md))
+- `pmx.fit_laplace(model)` — Laplace approximation for fast inference
 
 ## Custom Distributions and Model Components
 
-For extending PyMC beyond built-in distributions:
-
 ```python
-import pymc as pm
-import pytensor.tensor as pt
-
-# Custom likelihood via DensityDist
-def custom_logp(value, mu, sigma):
-    return pm.logp(pm.Normal.dist(mu=mu, sigma=sigma), value)
-
-with pm.Model() as model:
-    mu = pm.Normal("mu", 0, 1)
-    y = pm.DensityDist("y", mu, 1.0, logp=custom_logp, observed=y_obs)
-
 # Soft constraints via Potential
-with pm.Model() as model:
-    alpha = pm.Normal("alpha", 0, 1, dims="group")
-    pm.Potential("sum_to_zero", -100 * pt.sqr(alpha.sum()))
+import pytensor.tensor as pt
+pm.Potential("sum_to_zero", -100 * pt.sqr(alpha.sum()))
 ```
 
-See [references/custom_models.md](references/custom_models.md) for:
-- `pm.DensityDist` for custom likelihoods
-- `pm.Potential` for soft constraints and Jacobian adjustments
-- `pm.Simulator` for simulation-based inference (ABC)
-- `pm.CustomDist` for custom prior distributions
+See [references/custom_models.md](references/custom_models.md) for `pm.DensityDist`, `pm.Potential`, `pm.Simulator`, and `pm.CustomDist`.

@@ -85,6 +85,22 @@ When building hierarchical models iteratively:
 
 At each step, compare via LOO and check whether the added structure reduces between-group variance.
 
+## Compressed Storage
+
+For large InferenceData objects (many draws, large posterior predictive):
+
+```python
+# Compress with zlib (reduces file size 50-80%)
+idata.to_netcdf(
+    "results/model_v1.nc",
+    engine="h5netcdf",
+    encoding={var: {"zlib": True, "complevel": 4}
+              for group in ["posterior", "posterior_predictive"]
+              if hasattr(idata, group)
+              for var in getattr(idata, group).data_vars}
+)
+```
+
 ## References
 
 - Gelman, Vehtari, and McElreath (2025). "Statistical Workflow." *Philosophical Transactions of the Royal Society A.*

@@ -476,4 +476,4 @@ with pm.Model() as quantile_regression:
 - [priors.md](priors.md) - Prior selection guidance
 - [diagnostics.md](diagnostics.md) - Convergence diagnostics
 - [mixtures.md](mixtures.md) - Mixture models (related to zero-inflated)
-- [gotchas.md](gotchas.md) - Common pitfalls
+- [troubleshooting.md](troubleshooting.md) - Common pitfalls
