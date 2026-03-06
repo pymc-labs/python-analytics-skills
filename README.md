@@ -7,6 +7,7 @@ A plugin for Claude Code and other AI coding platforms providing [Agent Skills](
 | Skill | Description |
 |-------|-------------|
 | [pymc-modeling](skills/pymc-modeling/) | Bayesian statistical modeling with PyMC v5+. Covers model specification, MCMC inference (nutpie, NumPyro), ArviZ diagnostics, hierarchical models, GLMs, GPs, BART, time series, and more. |
+| [pymc-mlflow](skills/pymc-mlflow/) | MLflow integration for PyMC models. Covers experiment tracking, InferenceData artifact management, autologging with pymc_marketing.mlflow, metadata strategies, and production deployment patterns for MMM and CLV models. |
 | [pymc-testing](skills/pymc-testing/) | Testing PyMC models with pytest. Covers mock sampling with `pymc.testing.mock_sample`, pytest fixtures, and the distinction between fast structure-only tests (mocking) and slow posterior inference tests. |
 | [marimo-notebook](skills/marimo-notebook/) | Reactive Python notebooks with marimo. Covers CLI, UI components, layout, SQL integration, caching, state management, and wigglystuff widgets. |
 
@@ -72,6 +73,8 @@ python-analytics-skills/
 │   ├── pymc-modeling/
 │   │   ├── SKILL.md        # Main skill instructions
 │   │   └── references/     # 12 detailed reference docs
+│   ├── pymc-mlflow/
+│   │   ├── SKILL.md        # Main skill instructions
 │   ├── pymc-testing/
 │   │   ├── SKILL.md        # Main skill instructions
 │   │   └── references/
@@ -92,6 +95,7 @@ python-analytics-skills/
 
 The plugin includes a `UserPromptSubmit` hook that suggests relevant skills when it detects keywords in your prompt:
 
+- **PyMC + MLflow keywords**: mlflow, experiment tracking, artifact logging, model registry, deployment, mmm, clv, marketing mix model, customer lifetime value
 - **PyMC keywords**: bayesian, pymc, mcmc, posterior, inference, arviz, prior, sampling, divergence, hierarchical model, gaussian process, bart, etc.
 - **Marimo keywords**: marimo, reactive notebook, @app.cell, mo.ui, etc.
 

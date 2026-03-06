@@ -14,6 +14,11 @@
       "name": "pymc-testing",
       "description": "Testing PyMC models with pytest",
       "version": "1.0.0"
+    },
+    {
+      "name": "pymc-mlflow",
+      "description": "MLflow integration for PyMC models. Use when tracking experiments, logging artifacts (InferenceData, diagnostics, posterior predictive checks), comparing model runs, or preparing models for deployment.",
+      "version": "1.0.0"
     }
   ]
 }
