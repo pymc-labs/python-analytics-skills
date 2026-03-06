@@ -1,6 +1,6 @@
 {
   "name": "analytics",
-  "description": "Python analytics skills for Bayesian modeling and reactive notebooks",
+  "description": "Python analytics skills — reactive notebooks with marimo",
   "version": "1.0.0",
   "author": {
     "name": "Chris Fonnesbeck"

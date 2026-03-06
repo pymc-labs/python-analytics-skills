@@ -4,18 +4,24 @@
     "name": "Chris Fonnesbeck"
   },
   "metadata": {
-    "description": "Python analytics skills for Bayesian modeling and reactive notebooks",
-    "version": "1.0.0"
+    "description": "Python analytics plugins for Bayesian modeling and reactive notebooks",
+    "version": "2.0.0"
   },
   "plugins": [
     {
+      "name": "pymc-modeling",
+      "description": "PyMC Bayesian modeling plugin with skills, agents, hooks, and tools",
+      "source": {
+        "source": "github",
+        "repo": "pymc-labs/pymc-modeling"
+      }
+    },
+    {
       "name": "analytics",
-      "description": "Python analytics plugin — Bayesian modeling with PyMC, reactive notebooks with marimo",
+      "description": "Python analytics plugin — reactive notebooks with marimo",
       "source": "./",
       "skills": [
-        "./skills/pymc-modeling",
-        "./skills/marimo-notebook",
-        "./skills/pymc-testing"
+        "./skills/marimo-notebook"
       ]
     }
   ]
