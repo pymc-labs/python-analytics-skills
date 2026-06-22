@@ -344,10 +344,10 @@ Cutpoints define boundaries between adjacent categories on the latent scale:
 ```python
 # Posterior predictive probabilities for each category
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
 # Examine predicted category probabilities
-pred_probs = idata.posterior_predictive["y"]
+pred_probs = idata["posterior_predictive"]["y"]
 ```
 
 ### Priors for Cutpoints
@@ -437,7 +437,7 @@ with robust_model:
 comparison = az.compare({
     "normal": idata_normal,
     "robust": idata_robust,
-}, ic="loo")
+})
 ```
 
 ### Quantile Regression

@@ -1,12 +1,11 @@
 ---
 name: pymc-testing
 description: >
-  Testing PyMC models with pytest. Use when writing unit tests for Bayesian models,
-  setting up test fixtures, mocking MCMC sampling, or testing model structure.
-  Covers pymc.testing.mock_sample, pytest fixtures, and the distinction between
-  fast structure-only tests (mocking) and slow posterior inference tests.
-  Triggers on: testing PyMC, pytest, unit tests for models, mock sampling,
-  test fixtures, CI/CD for Bayesian models.
+  Load when writing or modifying pytest tests that touch pymc.Model, pm.sample, or any PyMC
+  model code. Covers pymc.testing.mock_sample, pytest fixtures for Bayesian models, and the
+  distinction between fast structure-only tests (mocking) and slow posterior inference tests.
+  Triggers include: testing PyMC, pytest with pymc, unit tests for Bayesian models, mock
+  sampling, test fixtures for models, CI/CD for PyMC.
 ---
 
 # PyMC Testing
@@ -64,13 +63,24 @@ def test_model_runs(mock_pymc_sample):
     with pm.Model() as model:
         pm.Normal("x", 0, 1)
         idata = pm.sample()
-        assert "x" in idata.posterior
+        assert "x" in idata["posterior"]
 ```
 
 A production-ready example from pymc-marketing:
 
 - **conftest.py**: https://github.com/pymc-labs/pymc-marketing/blob/main/tests/conftest.py
 - Also configures pytest markers for slow tests with `--run-slow` / `--only-slow` CLI options
+
+### Distribution testing helpers
+
+`pymc.testing` also exposes helpers for validating custom distributions against their analytic log-CDFs. In PyMC 6, both forms are available:
+
+```python
+from pymc.testing import check_logcdf, check_logccdf
+
+check_logcdf(MyDist, domain, params)   # log CDF
+check_logccdf(MyDist, domain, params)  # log complementary CDF (log survival)
+```
 
 ## Mocking Sample Stats
 
@@ -126,7 +136,7 @@ The fixture automatically replaces:
 
 This ensures prior predictive sampling works without invalid starting values.
 
-## InferenceData Structure Comparison
+## DataTree Structure Comparison
 
 **Mock sampling output** (from `mock_sample`):
 - `posterior` (derived from prior predictive)
@@ -141,7 +151,7 @@ Note: `mock_sample` uses prior predictive internally but returns it as `posterio
 
 Note: `posterior_predictive` is NOT included by default - you must call `pm.sample_posterior_predictive(idata, model=model)` separately. Warmup groups are sampler-dependent (nutpie includes them, default NUTS does not).
 
-**Gotcha**: Code that expects `posterior_predictive`, warmup groups, or sample_stats will fail with mock sampling. Different samplers produce different InferenceData structures.
+**Gotcha**: Code that expects `posterior_predictive`, warmup groups, or sample_stats will fail with mock sampling. Different samplers produce different DataTree structures.
 
 ## Common Testing Patterns
 

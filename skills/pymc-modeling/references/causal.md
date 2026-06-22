@@ -50,8 +50,8 @@ with pm.do(causal_model, {"treatment": 0}) as control:
     idata_control = pm.sample_prior_predictive(draws=2000)
 
 # ATE = E[Y | do(T=1)] - E[Y | do(T=0)]
-ate = (idata_treated.prior_predictive["outcome"].mean() -
-       idata_control.prior_predictive["outcome"].mean())
+ate = (idata_treated["prior_predictive"]["outcome"].mean() -
+       idata_control["prior_predictive"]["outcome"].mean())
 ```
 
 ## Key Considerations

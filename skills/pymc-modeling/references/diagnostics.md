@@ -27,14 +27,14 @@ def check_sampling(idata, var_names=None):
     if var_names is None:
         var_names = ["~offset", "~raw"]
 
-    # 1. Divergences
-    n_div = idata.sample_stats["diverging"].sum().item()
-    n_samples = idata.sample_stats["diverging"].size
+    # 1. Divergences (DataTree access in ArviZ 1.1)
+    n_div = idata["sample_stats"]["diverging"].sum().item()
+    n_samples = idata["sample_stats"]["diverging"].size
     print(f"Divergences: {n_div} ({100*n_div/n_samples:.2f}%)")
 
     # 2. Summary with key diagnostics
     summary = az.summary(idata, var_names=var_names)
-    display_cols = ["mean", "sd", "hdi_3%", "hdi_97%", "ess_bulk", "ess_tail", "r_hat"]
+    display_cols = ["mean", "sd", "eti89_lb", "eti89_ub", "ess_bulk", "ess_tail", "r_hat"]
     print(summary[[c for c in display_cols if c in summary.columns]])
 
     # 3. Flag issues
@@ -57,13 +57,13 @@ summary = check_sampling(idata)
 
 ```python
 # 1. Trace plots (mixing and stationarity)
-az.plot_trace(idata, compact=True)
+az.plot_trace_dist(idata, compact=True)
 
 # 2. Rank plots (more sensitive than traces)
 az.plot_rank(idata, var_names=["beta", "sigma"])
 
 # 3. Pair plot with divergences (if any divergences)
-if idata.sample_stats["diverging"].sum() > 0:
+if idata["sample_stats"]["diverging"].sum() > 0:
     az.plot_pair(idata, divergences=True)
 ```
 
@@ -153,7 +153,7 @@ sigma = pm.Exponential("sigma", lam=1)
 
 ```python
 # More careful sampling (slower but fewer divergences)
-idata = pm.sample(target_accept=0.95)  # default is 0.8
+idata = pm.sample(nuts={"target_accept": 0.95})  # default is 0.8
 
 # For nutpie
 idata = nutpie.sample(compiled, target_accept=0.95)
@@ -186,7 +186,7 @@ If divergences persist after trying above fixes:
 summary = az.summary(idata)
 print(summary[summary["r_hat"] > 1.01])
 
-az.plot_trace(idata, var_names=["problem_param"], compact=False)
+az.plot_trace_dist(idata, var_names=["problem_param"], compact=False)
 ```
 
 **Causes and fixes**:
@@ -201,7 +201,7 @@ az.plot_trace(idata, var_names=["problem_param"], compact=False)
 
 **Diagnostic**:
 ```python
-az.plot_ess(idata, var_names=["beta"], kind="evolution")
+az.plot_ess_evolution(idata, var_names=["beta"])
 az.plot_autocorr(idata, var_names=["beta"])
 ```
 
@@ -217,10 +217,10 @@ az.plot_autocorr(idata, var_names=["beta"])
 **Diagnostic**:
 ```python
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
-az.plot_ppc(idata, kind="cumulative")
-az.plot_loo_pit(idata, y="y")
+az.plot_ppc_dist(idata, kind="ecdf")
+az.plot_loo_pit(idata, var_names=["y"])
 ```
 
 **Causes and fixes**:
@@ -254,19 +254,24 @@ print(f"Problematic observations: {bad_idx}")
 
 ## LOO-CV and Model Comparison
 
-### Computing Log-Likelihood with nutpie
+### Computing Log-Likelihood (required for LOO-CV)
 
-nutpie does not store log-likelihood automatically (it silently ignores `idata_kwargs`). Compute it explicitly after sampling. See SKILL.md § Inference for details.
+PyMC 6 uses the `log_likelihood` group for LOO-CV and model comparison. Do not
+pass a top-level `compute_log_likelihood=` argument to `pm.sample`. Either
+request log-likelihood during conversion or compute it explicitly after sampling:
 
 ```python
 with model:
-    idata = pm.sample(nuts_sampler="nutpie", ...)
-    pm.compute_log_likelihood(idata)  # Required for LOO-CV
+    idata = pm.sample(idata_kwargs={"log_likelihood": True})
+
+# or, after an existing sample:
+with model:
+    pm.compute_log_likelihood(idata, model=model)
 ```
 
 ### plot_khat Requires LOO Object
 
-The `az.plot_khat()` function expects a LOO object (from `az.loo()`), not the InferenceData directly.
+The `az.plot_khat()` function expects a LOO object (from `az.loo()`), not the DataTree directly.
 
 ```python
 # ERROR: Incorrect khat data input
@@ -295,8 +300,8 @@ if n_bad > 0:
 ```python
 # Single model
 loo = az.loo(idata, pointwise=True)
-print(f"ELPD: {loo.elpd_loo:.1f} ± {loo.se:.1f}")
-print(f"p_loo: {loo.p_loo:.1f}")
+print(f"ELPD: {loo.elpd:.1f} ± {loo.se:.1f}")
+print(f"p: {loo.p:.1f}")
 
 # Check Pareto k
 print(f"Bad k (>0.7): {(loo.pareto_k > 0.7).sum().item()}")
@@ -309,30 +314,20 @@ comparison = az.compare({
     "model_a": idata_a,
     "model_b": idata_b,
     "model_c": idata_c,
-}, ic="loo")
+})
 
 # Key columns
-print(comparison[["rank", "elpd_loo", "p_loo", "d_loo", "weight", "dse"]])
+print(comparison[["rank", "elpd", "p", "elpd_diff", "weight", "dse"]])
 
 # Visual comparison
 az.plot_compare(comparison)
 ```
 
 **Interpretation**:
-- `elpd_loo`: Higher is better (log predictive density)
-- `d_loo`: Difference from best model
+- `elpd`: Higher is better (log predictive density)
+- `elpd_diff`: Difference from best model
 - `dse`: Standard error of difference
-- **Rule**: If `d_loo < 2*dse`, models are effectively equivalent
-
-### When to Use WAIC vs LOO
-
-- **LOO (default)**: More robust, handles outliers better
-- **WAIC**: Faster for large datasets, but less robust
-
-```python
-# WAIC alternative
-waic = az.waic(idata)
-```
+- **Rule**: If `elpd_diff < 2*dse`, models are effectively equivalent
 
 ---
 

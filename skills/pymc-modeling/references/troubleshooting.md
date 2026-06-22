@@ -261,10 +261,10 @@ For scattered divergences (not clustered in funnels), try increasing `target_acc
 
 ```python
 # Default is 0.8; increase for difficult posteriors
-idata = pm.sample(target_accept=0.95)
+idata = pm.sample(nuts={"target_accept": 0.95})
 
 # For very difficult models
-idata = pm.sample(target_accept=0.99)
+idata = pm.sample(nuts={"target_accept": 0.99})
 ```
 
 **Trade-off**: Higher target acceptance means smaller step sizes and slower sampling.
@@ -287,9 +287,7 @@ mu = pm.math.clip(x, 0, np.inf)
 
 ```python
 # Softplus maps R -> R+ with smooth gradients
-from pytensor.tensor.nnet import softplus
-
-mu = softplus(x)  # log(1 + exp(x))
+mu = pm.math.softplus(x)  # log(1 + exp(x))
 ```
 
 **Solution 2: Use distributions with natural constraints**
@@ -572,7 +570,7 @@ Always check prior implications before fitting:
 with model:
     prior_pred = pm.sample_prior_predictive()
 
-az.plot_ppc(prior_pred, group="prior")
+az.plot_ppc_dist(prior_pred, group="prior_predictive")
 ```
 
 If prior predictive range is implausible (negative counts, probabilities > 1, extreme values), adjust priors before proceeding.
@@ -583,7 +581,7 @@ Horseshoe priors have a massive spike at zero and heavy tails, creating a "doubl
 
 ```python
 # Horseshoe often requires very high target_accept
-idata = pm.sample(target_accept=0.99)
+idata = pm.sample(nuts={"target_accept": 0.99})
 
 # Consider Regularized Horseshoe for better geometry (manual implementation)
 # See priors.md for full regularized horseshoe code
@@ -618,7 +616,7 @@ with pm.Model() as correct:
 
 ### Variable Name Same as Dimension Label
 
-PyMC v5+ does not allow a variable to have the same name as its dimension label. This causes a `ValueError` at model creation.
+PyMC 6+ does not allow a variable to have the same name as its dimension label. This causes a `ValueError` at model creation.
 
 ```python
 # ERROR: Variable `cohort` has the same name as its dimension label
@@ -635,23 +633,19 @@ with pm.Model(coords=coords) as model:
 
 ### ArviZ plot_ppc Parameter Names
 
-ArviZ's `plot_ppc()` function does not accept `num_pp_samples` parameter. This parameter was removed in recent versions.
+ArviZ's `plot_ppc_dist()` function uses `num_samples=`, not the old `num_pp_samples=` parameter.
 
 ```python
 # ERROR: Unexpected keyword argument
-az.plot_ppc(idata, kind="cumulative", num_pp_samples=100)  # TypeError
+az.plot_ppc_dist(idata, kind="ecdf", num_pp_samples=100)  # TypeError
 
-# FIX: Remove num_pp_samples parameter
-az.plot_ppc(idata, kind="cumulative")  # OK
-
-# Subset to fewer draws if needed
-idata_subset = idata.sel(draw=slice(0, 100))
-az.plot_ppc(idata_subset, kind="cumulative")
+# FIX: Use num_samples for the number of predictive draws
+az.plot_ppc_dist(idata, kind="ecdf", num_samples=100)  # OK
 ```
 
 ### pm.MutableData / pm.ConstantData Deprecation
 
-`pm.MutableData` and `pm.ConstantData` are deprecated in PyMC v5+. Use `pm.Data` instead, which is mutable by default.
+`pm.MutableData` and `pm.ConstantData` are removed in PyMC 6+. Use `pm.Data` instead, which is mutable by default.
 
 ```python
 # DEPRECATED
@@ -797,14 +791,10 @@ az.plot_pair(idata, var_names=["alpha", "beta"], divergences=True)
 
 ```python
 # Compare prior and posterior
-az.plot_dist_comparison(idata, var_names=["sigma"])
+az.plot_prior_posterior(idata, var_names=["sigma"])
 
 # Visual comparison for all parameters
-fig, axes = plt.subplots(1, len(param_names), figsize=(4*len(param_names), 3))
-for ax, var in zip(axes, param_names):
-    az.plot_density(idata.prior, var_names=[var], ax=ax, colors="C0", label="Prior")
-    az.plot_density(idata.posterior, var_names=[var], ax=ax, colors="C1", label="Posterior")
-    ax.set_title(var)
+az.plot_prior_posterior(idata, var_names=param_names)
 ```
 
 ### Common Scenarios
@@ -877,7 +867,7 @@ az.plot_pair(idata, var_names=["beta"])
 
 # Wide credible intervals despite large N
 summary = az.summary(idata, var_names=["beta"])
-print(summary[["mean", "sd", "hdi_3%", "hdi_97%"]])
+print(summary[["mean", "sd", "eti89_lb", "eti89_ub"]])
 ```
 
 ### Solutions

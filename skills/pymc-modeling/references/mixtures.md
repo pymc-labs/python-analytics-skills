@@ -97,7 +97,7 @@ In mixture models, the likelihood is invariant to permutations of component labe
 
 ```python
 # Trace plots show "switching" between modes
-az.plot_trace(idata, var_names=["mu"])
+az.plot_trace_dist(idata, var_names=["mu"])
 
 # Pair plots show symmetric clusters
 az.plot_pair(idata, var_names=["mu"], coords={"component": [0, 1]})
@@ -141,18 +141,18 @@ When ordering constraints aren't natural, relabel samples post-hoc:
 # Simple relabeling based on component means
 def relabel_samples(idata):
     """Relabel mixture components by sorting means within each draw."""
-    mu = idata.posterior["mu"].values  # (chain, draw, component)
+    mu = idata["posterior"]["mu"].values  # (chain, draw, component)
 
     # Get sort indices for each draw
     sort_idx = np.argsort(mu, axis=-1)
 
     # Apply to all component-indexed variables
     for var in ["mu", "sigma", "w"]:
-        if var in idata.posterior:
-            vals = idata.posterior[var].values
+        if var in idata["posterior"].ds:
+            vals = idata["posterior"][var].values
             # Gather along component axis using sort indices
             relabeled = np.take_along_axis(vals, sort_idx, axis=-1)
-            idata.posterior[var].values = relabeled
+            idata["posterior"][var].values = relabeled
 
     return idata
 ```
@@ -166,10 +166,10 @@ If you only care about **predictions** (not component interpretation), label swi
 ```python
 # Posterior predictive is invariant to label permutations
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
 # This is unaffected by label switching
-az.plot_ppc(idata)
+az.plot_ppc_dist(idata)
 ```
 
 ---
@@ -234,7 +234,7 @@ with pm.Model() as marginal_model:
 
 ```python
 # 1. Trace plots should NOT show "switching" patterns
-az.plot_trace(idata, var_names=["mu", "w"])
+az.plot_trace_dist(idata, var_names=["mu", "w"])
 
 # 2. Rank plots should be uniform (not bimodal)
 az.plot_rank(idata, var_names=["mu"])
@@ -248,13 +248,13 @@ print(summary[["r_hat"]])
 
 ```python
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
 # Check if mixture captures data distribution shape
-az.plot_ppc(idata, kind="kde")
+az.plot_ppc_dist(idata, kind="kde")
 
 # For multimodal data, cumulative is often clearer
-az.plot_ppc(idata, kind="cumulative")
+az.plot_ppc_dist(idata, kind="ecdf")
 ```
 
 ### Model Selection for Number of Components
@@ -270,26 +270,26 @@ for K in [2, 3, 4]:
         models[f"K={K}"] = idata
 
 # Compare
-comparison = az.compare(models, ic="loo")
-print(comparison[["rank", "elpd_loo", "d_loo", "weight"]])
+comparison = az.compare(models)
+print(comparison[["rank", "elpd", "elpd_diff", "weight"]])
 az.plot_compare(comparison)
 ```
 
 **Caution**: LOO can be unreliable for mixture models due to high Pareto k values. Consider:
 - K-fold cross-validation when LOO diagnostics fail
-- WAIC as a secondary check
+- K-fold cross-validation as a secondary check
 - Domain knowledge about plausible number of components
 
 ### Assessing Component Separation
 
 ```python
 # Posterior distribution of component means
-az.plot_posterior(idata, var_names=["mu"])
+az.plot_dist(idata, var_names=["mu"])
 
 # Check overlap between components
 # Well-separated components have non-overlapping HDIs
-summary = az.summary(idata, var_names=["mu"], hdi_prob=0.94)
-print(summary[["mean", "hdi_3%", "hdi_97%"]])
+summary = az.summary(idata, var_names=["mu"], ci_prob=0.94, ci_kind="hdi")
+print(summary[["mean", "hdi94_lb", "hdi94_ub"]])
 ```
 
 ---

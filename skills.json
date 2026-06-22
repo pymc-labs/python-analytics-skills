@@ -1,18 +1,33 @@
 {
   "skills": [
     {
-      "name": "pymc-modeling",
-      "description": "Bayesian statistical modeling with PyMC v5+",
+      "name": "marimo-notebook",
+      "description": "Reactive Python notebooks with marimo.",
       "version": "1.0.0"
     },
     {
-      "name": "marimo-notebook",
-      "description": "Reactive Python notebooks with marimo",
+      "name": "model-evaluation",
+      "description": "Bayesian model comparison, LOO-CV, ELPD, stacking, and predictive evaluation.",
       "version": "1.0.0"
+    },
+    {
+      "name": "prior-elicitation",
+      "description": "Prior selection, prior predictive checks, PreliZ, and constrained prior elicitation.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "pymc-extras",
+      "description": "pymc-extras features including splines, distributional regression, R2D2, marginalization, and Laplace approximation.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "pymc-modeling",
+      "description": "PyMC, PyTensor, and ArviZ Bayesian modeling guidance.",
+      "version": "2.0.0"
     },
     {
       "name": "pymc-testing",
-      "description": "Testing PyMC models with pytest",
+      "description": "Testing PyMC models with pytest, fixtures, and mock sampling.",
       "version": "1.0.0"
     }
   ]

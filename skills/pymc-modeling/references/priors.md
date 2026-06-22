@@ -291,10 +291,10 @@ with model:
 
 # Visualize prior predictive distribution
 import arviz as az
-az.plot_ppc(prior_pred, group="prior", kind="cumulative")
+az.plot_ppc_dist(prior_pred, group="prior_predictive", kind="ecdf")
 
 # Numerical summary
-prior_y = prior_pred.prior_predictive["y"].values.flatten()
+prior_y = prior_pred["prior_predictive"]["y"].values.flatten()
 print(f"Prior predictive range: [{prior_y.min():.2f}, {prior_y.max():.2f}]")
 print(f"Prior predictive mean: {prior_y.mean():.2f}")
 print(f"Prior predictive std: {prior_y.std():.2f}")
@@ -311,7 +311,7 @@ print(f"Prior predictive std: {prior_y.std():.2f}")
 
 ```python
 # Example: checking for implausible values
-prior_y = prior_pred.prior_predictive["y"].values.flatten()
+prior_y = prior_pred["prior_predictive"]["y"].values.flatten()
 
 # For count data - should be non-negative
 if (prior_y < 0).any():
@@ -349,7 +349,7 @@ for sd in [0.5, 1.0, 2.0, 5.0]:
 
 # Check if posteriors are similar
 for sd, trace in traces.items():
-    print(f"Prior SD={sd}: posterior mean={trace.posterior['beta'].mean():.3f}")
+    print(f"Prior SD={sd}: posterior mean={trace['posterior']['beta'].mean():.3f}")
 ```
 
 ### Prior-Likelihood Conflict
@@ -358,12 +358,12 @@ Occurs when data substantially contradicts the prior. Can detect using prior-pos
 
 ```python
 # Compare prior and posterior
-az.plot_dist_comparison(trace, var_names=["beta"])
+az.plot_prior_posterior(idata, var_names=["beta"])
 
 # Large divergence suggests prior-likelihood conflict
 prior_mean = 0  # from prior specification
-posterior_mean = trace.posterior["beta"].mean().item()
-posterior_sd = trace.posterior["beta"].std().item()
+posterior_mean = trace["posterior"]["beta"].mean().item()
+posterior_sd = trace["posterior"]["beta"].std().item()
 
 # Check if prior is many SDs from posterior
 if abs(prior_mean - posterior_mean) > 3 * posterior_sd:
@@ -399,7 +399,7 @@ with pm.Model() as model:
 
 ### 2. Use Coords and Dims
 
-Makes prior specification clearer and InferenceData more interpretable:
+Makes prior specification clearer and DataTree more interpretable:
 
 ```python
 coords = {

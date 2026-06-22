@@ -102,19 +102,15 @@ with pm.Model() as model:
     # ... model specification ...
     pass
 
-# Sample with nutpie backend
+# Sample with PyMC 6's automatic NUTS backend selection
 with model:
     idata = pm.sample(
         draws=1000,
         tune=1000,
         chains=4,
-        nuts_sampler="nutpie",
         random_seed=42,
+        idata_kwargs={"log_likelihood": True},  # include when you need LOO-CV/LOO-PIT
     )
-
-    # IMPORTANT: nutpie doesn't store log_likelihood automatically
-    # Compute it explicitly if you need LOO-CV or LOO-PIT
-    pm.compute_log_likelihood(idata)
 ```
 
 #### Configuration Options
@@ -128,7 +124,7 @@ with model:
         nuts_sampler="nutpie",
         random_seed=42,
         progressbar=True,
-        target_accept=0.8,  # increase for difficult posteriors
+        nuts={"target_accept": 0.8},  # increase for difficult posteriors
         cores=4,            # number of parallel chains
     )
 ```
@@ -182,7 +178,7 @@ with model:
         tune=1000,
         chains=4,
         nuts_sampler="numpyro",
-        nuts_sampler_kwargs={"chain_method": "vectorized"},
+        nuts={"chain_method": "vectorized"},
     )
 ```
 
@@ -195,8 +191,7 @@ with model:
         tune=1000,
         chains=4,
         nuts_sampler="numpyro",
-        target_accept=0.9,
-        nuts_sampler_kwargs={"max_tree_depth": 12},
+        nuts={"target_accept": 0.9, "max_tree_depth": 12},
         progressbar=True,
     )
 ```
@@ -218,7 +213,7 @@ with model:
         tune=1000,
         chains=4,
         random_seed=42,
-        target_accept=0.8,
+        nuts={"target_accept": 0.8},
     )
 ```
 
@@ -318,7 +313,7 @@ with model:
 
     # Extract initial values
     init_vals = {
-        var.name: pathfinder_idata.posterior[var.name].mean(dim=["chain", "draw"]).values
+        var.name: pathfinder_idata["posterior"][var.name].mean(dim=["chain", "draw"]).values
         for var in model.free_RVs
     }
 

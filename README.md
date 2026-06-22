@@ -1,13 +1,16 @@
 # Python Analytics Skills
 
-A plugin for Claude Code and other AI coding platforms providing [Agent Skills](https://agentskills.io) for Bayesian modeling and reactive notebooks. Packages specialized knowledge for PyMC and marimo into skills that Claude loads on-demand.
+A plugin for Claude Code and other AI coding platforms providing [Agent Skills](https://agentskills.io) for Bayesian modeling and reactive notebooks. Packages specialized knowledge for PyMC and marimo into skills that Claude loads on demand.
 
 ## Skills
 
 | Skill | Description |
 |-------|-------------|
-| [pymc-modeling](skills/pymc-modeling/) | Bayesian statistical modeling with PyMC v5+. Covers model specification, MCMC inference (nutpie, NumPyro), ArviZ diagnostics, hierarchical models, GLMs, GPs, BART, time series, and more. |
-| [pymc-testing](skills/pymc-testing/) | Testing PyMC models with pytest. Covers mock sampling with `pymc.testing.mock_sample`, pytest fixtures, and the distinction between fast structure-only tests (mocking) and slow posterior inference tests. |
+| [pymc-modeling](skills/pymc-modeling/) | Bayesian statistical modeling with PyMC 6+, PyTensor 3+, and ArviZ 1.1+. Covers model specification, inference, diagnostics, hierarchical models, GLMs, GPs, BART, time series, causal models, and custom likelihoods. |
+| [prior-elicitation](skills/prior-elicitation/) | Prior selection, prior predictive checks, constrained priors, PreliZ workflows, expert priors, weakly informative priors, and prior sensitivity analysis. |
+| [pymc-extras](skills/pymc-extras/) | pymc-extras guidance for splines, distributional regression, R2D2/horseshoe priors, marginalization, and Laplace approximation. |
+| [pymc-testing](skills/pymc-testing/) | Testing PyMC models with pytest. Covers `pymc.testing.mock_sample`, fixtures, structure-only tests, and slow posterior inference tests. |
+| [model-evaluation](skills/model-evaluation/) | Bayesian model comparison and predictive evaluation with ArviZ 1.1 LOO/ELPD, stacking, model averaging, Bayes factors, and Pareto-k diagnostics. |
 | [marimo-notebook](skills/marimo-notebook/) | Reactive Python notebooks with marimo. Covers CLI, UI components, layout, SQL integration, caching, state management, and wigglystuff widgets. |
 
 ## Installation
@@ -36,9 +39,9 @@ Installs all skills plus the keyword-suggestion hook. Supports `/plugin update` 
 ```bash
 git clone https://github.com/pymc-labs/python-analytics-skills.git
 cd python-analytics-skills
-./install.sh claude              # Claude Code
-./install.sh all                 # All platforms
-./install.sh claude -- pymc-modeling  # Specific skill only
+./install.sh claude                    # Claude Code
+./install.sh all                       # All platforms
+./install.sh claude -- pymc-modeling   # Specific skill only
 ```
 
 ### Utility Commands
@@ -63,23 +66,18 @@ cd python-analytics-skills
 
 ## Plugin Structure
 
-```
+```text
 python-analytics-skills/
 ├── .claude-plugin/
 │   ├── marketplace.json    # Plugin registry metadata
 │   └── plugin.json         # Plugin configuration
 ├── skills/
-│   ├── pymc-modeling/
-│   │   ├── SKILL.md        # Main skill instructions
-│   │   └── references/     # 12 detailed reference docs
-│   ├── pymc-testing/
-│   │   ├── SKILL.md        # Main skill instructions
-│   │   └── references/
-│   └── marimo-notebook/
-│       ├── SKILL.md        # Main skill instructions
-│       ├── references/     # 4 reference docs
-│       ├── assets/         # Notebook templates
-│       └── scripts/        # Conversion utilities
+│   ├── pymc-modeling/      # Main PyMC skill plus detailed references
+│   ├── prior-elicitation/  # Prior workflow references
+│   ├── pymc-extras/        # pymc-extras references
+│   ├── pymc-testing/       # PyMC testing references
+│   ├── model-evaluation/   # LOO/model comparison references
+│   └── marimo-notebook/    # Marimo references, templates, and conversion utilities
 ├── hooks/
 │   ├── hooks.json          # Hook configuration
 │   └── suggest-skill.sh    # Keyword-based skill suggestion
@@ -93,7 +91,8 @@ python-analytics-skills/
 The plugin includes a `UserPromptSubmit` hook that suggests relevant skills when it detects keywords in your prompt:
 
 - **PyMC keywords**: bayesian, pymc, mcmc, posterior, inference, arviz, prior, sampling, divergence, hierarchical model, gaussian process, bart, etc.
-- **Marimo keywords**: marimo, reactive notebook, @app.cell, mo.ui, etc.
+- **PyMC companion keywords**: PreliZ, prior elicitation, model comparison, LOO, ELPD, pymc-extras, splines, testing PyMC, mock sampling, etc.
+- **Marimo keywords**: marimo, reactive notebook, `@app.cell`, `mo.ui`, notebook conversion, wigglystuff, etc.
 
 ## Troubleshooting
 

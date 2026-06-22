@@ -37,7 +37,7 @@ comparison = az.compare({
     "simple": idata_simple,
     "complex": idata_complex,
 })
-print(comparison[["rank", "elpd_loo", "elpd_diff", "se_diff", "weight"]])
+print(comparison[["rank", "elpd", "elpd_diff", "dse", "weight"]])
 ```
 
 **Decision rule**: If two models have similar stacking weights, they are effectively equivalent.
@@ -54,13 +54,13 @@ Report the sequence of models, not just the final one. The modeling journey IS t
 Summarize with a model progression table:
 
 ```
-| Model | Description | ELPD_LOO | elpd_diff | weight |
+| Model | Description | ELPD | elpd_diff | weight |
 |-------|-------------|----------|-----------|--------|
 | Model 2 | Partial pooling | -222.2 | 0.0 | 0.91 |
 | Model 1 | Complete pooling | -234.5 | -12.3 | 0.09 |
 ```
 
-Include: prior predictive findings, posterior predictive misfits that motivated each expansion, model comparison results, final parameter estimates with 94% HDIs, and conclusions about what the data support.
+Include: prior predictive findings, posterior predictive misfits that motivated each expansion, model comparison results, final parameter estimates with 89% ETIs (ArviZ 1.1 default), and conclusions about what the data support.
 
 ## Simulating Fake Data
 
@@ -87,17 +87,18 @@ At each step, compare via LOO and check whether the added structure reduces betw
 
 ## Compressed Storage
 
-For large InferenceData objects (many draws, large posterior predictive):
+For large DataTree objects (many draws, large posterior predictive):
 
 ```python
 # Compress with zlib (reduces file size 50-80%)
+# In ArviZ 1.1, idata is a DataTree; access groups via dict syntax
 idata.to_netcdf(
     "results/model_v1.nc",
     engine="h5netcdf",
     encoding={var: {"zlib": True, "complevel": 4}
               for group in ["posterior", "posterior_predictive"]
-              if hasattr(idata, group)
-              for var in getattr(idata, group).data_vars}
+              if group in idata.children
+              for var in idata[group].ds.data_vars}
 )
 ```
 

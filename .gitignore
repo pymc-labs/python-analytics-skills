@@ -12,8 +12,16 @@ __pycache__/
 *.swp
 *.swo
 
-# Benchmark results
-results/
+# Benchmark generated artifacts
+benchmark/**/results/
+benchmark/**/*.nc
+benchmark/**/*.tar.gz
+benchmark/**/figures/
+benchmark/**/.pixi/
+
+# Local/experimental optimizer tooling
+scripts/optimizer.py
+scripts/prompts.py
 
 # AI
 plans/

@@ -235,7 +235,7 @@ with bart_model:
     ppc = pm.sample_posterior_predictive(idata, var_names=["y_obs"])
 
 # Extract predictions
-y_pred = ppc.posterior_predictive["y_obs"]
+y_pred = ppc["posterior_predictive"]["y_obs"]
 ```
 
 ## Convergence Diagnostics
@@ -245,9 +245,9 @@ BART uses a particle Gibbs sampler, so standard MCMC diagnostics apply:
 ```python
 import arviz as az
 
-az.plot_trace(idata, var_names=["sigma"])
+az.plot_trace_dist(idata, var_names=["sigma"])
 az.summary(idata, var_names=["sigma"])
 
 # For BART predictions, check posterior predictive
-az.plot_ppc(idata)
+az.plot_ppc_dist(idata)
 ```

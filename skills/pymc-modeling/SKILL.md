@@ -1,23 +1,25 @@
 ---
 name: pymc-modeling
 description: >
-  Bayesian statistical modeling with PyMC v5+. Use when building probabilistic models,
-  specifying priors, running MCMC inference, diagnosing convergence, or comparing models.
-  Covers PyMC, ArviZ, pymc-bart, pymc-extras, nutpie, and JAX/NumPyro backends. Triggers
-  on tasks involving: Bayesian inference, posterior sampling, hierarchical/multilevel models,
-  GLMs, time series, Gaussian processes, BART, mixture models, prior/posterior predictive
-  checks, MCMC diagnostics, LOO-CV, WAIC, model comparison, or causal inference with do/observe.
+  Load whenever the user is working on code that imports pymc, pytensor, or arviz, or asks
+  about Bayesian modeling, MCMC, priors, posteriors, sampling, or model diagnostics. Covers
+  PyMC 6+, PyTensor 3+, ArviZ 1.1+ (DataTree API), pymc-bart, pymc-extras, nutpie, and
+  JAX/NumPyro backends. Use for building probabilistic models, specifying priors, running
+  MCMC, diagnosing convergence, or comparing models. Triggers include: Bayesian inference,
+  posterior sampling, hierarchical/multilevel models, GLMs, time series, Gaussian processes,
+  HSGP, BART, mixture models, prior/posterior predictive checks, MCMC diagnostics, LOO-CV,
+  model comparison, causal inference with do/observe, and any PyTensor Op or graph work.
 ---
 
 # PyMC Modeling
 
-Modern Bayesian modeling with PyMC v5+. Key defaults: nutpie sampler (2-5x faster), non-centered parameterization for hierarchical models, HSGP over exact GPs, coords/dims for readable InferenceData, and save-early workflow to prevent data loss from late crashes.
+Modern Bayesian modeling with PyMC 6+ on the ArviZ 1.1 / PyTensor 3 stack. Key defaults: nutpie sampler (2-5x faster; PyMC 6 selects it automatically when installed — no `nuts_sampler` argument needed), non-centered parameterization for hierarchical models, HSGP over exact GPs, coords/dims for readable DataTree output, and save-early workflow to prevent data loss from late crashes.
+
+`pm.sample(...)` returns an `xarray.DataTree` — the `idata` name is kept by convention, but it is a DataTree, not the old `InferenceData`. Access groups by bracket: `idata["posterior"]`, `idata["sample_stats"]`, etc.
 
 **Modeling strategy**: Build models iteratively — start simple, check prior
 predictions, fit and diagnose, check posterior predictions, expand one piece at
 a time. See [references/workflow.md](references/workflow.md) for the full workflow.
-
-**Notebook preference**: Use marimo for interactive modeling unless the project already uses Jupyter.
 
 ## Model Specification
 
@@ -40,12 +42,12 @@ with pm.Model(coords=coords) as model:
     y = pm.Normal("y", mu=mu, sigma=sigma, observed=y_obs, dims="obs")
 
     # Inference
-    idata = pm.sample(nuts_sampler="nutpie", random_seed=42)
+    idata = pm.sample(random_seed=42)  # PyMC 6 uses nutpie automatically when installed
 ```
 
 ### Coords and Dims
 
-Use coords/dims for interpretable InferenceData when model has meaningful structure:
+Use coords/dims for an interpretable DataTree when the model has meaningful structure:
 
 ```python
 coords = {
@@ -74,28 +76,38 @@ alpha = pm.Normal("alpha", mu_alpha, sigma_alpha, dims="group")
 
 ### Default Sampling (nutpie preferred)
 
+In PyMC 6, `pm.sample` uses nutpie automatically whenever it is installed and the
+model can be compiled — do not pass `nuts_sampler="nutpie"` explicitly:
+
 ```python
 with model:
     idata = pm.sample(
         draws=1000, tune=1000, chains=4,
-        nuts_sampler="nutpie",
         random_seed=42,
     )
 idata.to_netcdf("results.nc")  # Save immediately after sampling
 ```
 
-**Important**: nutpie does not store log_likelihood automatically (it silently ignores `idata_kwargs={"log_likelihood": True}`). If you need LOO-CV or model comparison, compute it after sampling:
+**Important**: For LOO-CV, model comparison, or LOO-PIT checks, ensure the
+`log_likelihood` group exists. In PyMC 6, do not pass a top-level
+`compute_log_likelihood=` argument to `pm.sample`. Either request it during
+conversion with `idata_kwargs={"log_likelihood": True}` or compute it explicitly
+after sampling:
 
 ```python
+idata = pm.sample(idata_kwargs={"log_likelihood": True}, random_seed=42)
+# or, after an existing sample:
 pm.compute_log_likelihood(idata, model=model)
 ```
 
+This applies to every sampler (nutpie, PyMC NUTS, NumPyro) — not just nutpie.
+
 ### When to Use PyMC's Default NUTS Instead
 
-nutpie cannot handle discrete parameters or certain transforms (e.g., `ordered` transform with `OrderedLogistic`/`OrderedProbit`). For these models, omit `nuts_sampler="nutpie"`:
+nutpie cannot handle discrete parameters or certain transforms (e.g., `ordered` transform with `OrderedLogistic`/`OrderedProbit`). PyMC 6 falls back automatically; to force the PyMC sampler explicitly, pass `nuts_sampler="pymc"`:
 
 ```python
-idata = pm.sample(draws=1000, tune=1000, chains=4, random_seed=42)
+idata = pm.sample(draws=1000, tune=1000, chains=4, nuts_sampler="pymc", random_seed=42)
 ```
 
 Never change the model specification to work around sampler limitations.
@@ -127,15 +139,17 @@ Follow this systematic workflow after every sampling run:
 
 ```python
 # 1. Check for divergences (must be 0 or near 0)
-n_div = idata.sample_stats["diverging"].sum().item()
+# idata is an xarray.DataTree; path-access gets a DataArray
+n_div = idata["sample_stats"]["diverging"].sum().item()
 print(f"Divergences: {n_div}")
 
 # 2. Summary with convergence diagnostics
+# Default CI is 0.89 ETI (equal-tailed) — bounds labelled eti89_lb / eti89_ub
 summary = az.summary(idata, var_names=["~offset"])  # exclude auxiliary
-print(summary[["mean", "sd", "hdi_3%", "hdi_97%", "ess_bulk", "ess_tail", "r_hat"]])
+print(summary[["mean", "sd", "eti89_lb", "eti89_ub", "ess_bulk", "ess_tail", "r_hat"]])
 
 # 3. Visual convergence check
-az.plot_trace(idata, compact=True)
+az.plot_trace_dist(idata, compact=True)
 az.plot_rank(idata, var_names=["beta", "sigma"])
 ```
 
@@ -149,7 +163,7 @@ az.plot_rank(idata, var_names=["beta", "sigma"])
 
 ```python
 # ESS evolution (should grow linearly)
-az.plot_ess(idata, kind="evolution")
+az.plot_ess_evolution(idata)
 
 # Energy diagnostic (HMC health)
 az.plot_energy(idata)
@@ -163,13 +177,13 @@ az.plot_autocorr(idata, var_names=["beta"])
 ```python
 # Generate posterior predictive
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
 # Does the model capture the data?
-az.plot_ppc(idata, kind="cumulative")
+az.plot_ppc_dist(idata, kind="ecdf")
 
 # Calibration check
-az.plot_loo_pit(idata, y="y")
+az.plot_loo_pit(idata, var_names=["y"])
 ```
 
 **Critical rule**: Never interpret parameters until Phases 1-3 pass.
@@ -178,7 +192,7 @@ az.plot_loo_pit(idata, y="y")
 
 ```python
 # Posterior summaries
-az.plot_posterior(idata, var_names=["beta"], ref_val=0)
+az.plot_dist(idata, var_names=["beta"])
 
 # Forest plots for hierarchical parameters
 az.plot_forest(idata, var_names=["alpha"], combined=True)
@@ -200,8 +214,8 @@ Always check prior implications before fitting:
 with model:
     prior_pred = pm.sample_prior_predictive(draws=500)
 
-az.plot_ppc(prior_pred, group="prior", kind="cumulative")
-prior_y = prior_pred.prior_predictive["y"].values.flatten()
+az.plot_ppc_dist(prior_pred, group="prior_predictive", kind="ecdf")
+prior_y = prior_pred["prior_predictive"]["y"].values.flatten()
 print(f"Prior predictive range: [{prior_y.min():.1f}, {prior_y.max():.1f}]")
 ```
 
@@ -211,10 +225,10 @@ print(f"Prior predictive range: [{prior_y.min():.1f}, {prior_y.max():.1f}]")
 
 ```python
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
-az.plot_ppc(idata, kind="cumulative")
-az.plot_loo_pit(idata, y="y")
+az.plot_ppc_dist(idata, kind="ecdf")
+az.plot_loo_pit(idata, var_names=["y"])
 ```
 
 Observed data (dark line) should fall within posterior predictive distribution. See [references/arviz.md](references/arviz.md) for detailed interpretation.
@@ -248,32 +262,33 @@ For profiling slow models, see [references/troubleshooting.md](references/troubl
 ```python
 # Compute LOO with pointwise diagnostics
 loo = az.loo(idata, pointwise=True)
-print(f"ELPD: {loo.elpd_loo:.1f} ± {loo.se:.1f}")
+print(f"ELPD: {loo.elpd:.1f} ± {loo.se:.1f}")
 
 # Check Pareto k values (must be < 0.7 for reliable LOO)
 print(f"Bad k (>0.7): {(loo.pareto_k > 0.7).sum().item()}")
-az.plot_khat(idata)
+az.plot_khat(loo)
 ```
 
 ### Comparing Models
 
 ```python
-# If using nutpie, compute log-likelihood first (nutpie doesn't store it automatically)
+# PyMC 6 requires an explicit log-likelihood compute before LOO
 pm.compute_log_likelihood(idata_a, model=model_a)
 pm.compute_log_likelihood(idata_b, model=model_b)
 
+# ArviZ 1.1 — only loo is supported (waic was removed)
 comparison = az.compare({
     "model_a": idata_a,
     "model_b": idata_b,
-}, ic="loo")
+})
 
-print(comparison[["rank", "elpd_loo", "elpd_diff", "weight"]])
+print(comparison[["rank", "elpd", "elpd_diff", "weight"]])
 az.plot_compare(comparison)
 ```
 
 **Decision rule**: If two models have similar stacking weights, they are effectively equivalent.
 
-See [references/arviz.md](references/arviz.md) for detailed model comparison workflow.
+See [references/arviz.md](references/arviz.md) for detailed model comparison workflow. For detailed LOO-CV workflows, model stacking, and calibration diagnostics, see the [model-evaluation skill](../model-evaluation/SKILL.md).
 
 ### Iterative Model Building
 
@@ -284,9 +299,9 @@ See [references/workflow.md](references/workflow.md) for the full iterative work
 
 ## Saving and Loading Results
 
-### InferenceData Persistence
+### DataTree Persistence
 
-Save sampling results for later analysis or sharing:
+`pm.sample()` returns an `xarray.DataTree`. Persist with NetCDF; the `idata` name is convention.
 
 ```python
 # Save to NetCDF (recommended format)
@@ -296,19 +311,21 @@ idata.to_netcdf("results/model_v1.nc")
 idata = az.from_netcdf("results/model_v1.nc")
 ```
 
-For compressed storage of large InferenceData objects, see [references/workflow.md](references/workflow.md).
+For compressed storage of large DataTree objects, see [references/workflow.md](references/workflow.md).
 
 **Critical**: Save IMMEDIATELY after sampling — late crashes destroy valid results:
 
 ```python
 with model:
-    idata = pm.sample(nuts_sampler="nutpie")
+    idata = pm.sample()  # nutpie by default in PyMC 6; returns a DataTree
 idata.to_netcdf("results.nc")  # Save before any post-processing!
 
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))  # .update() merges the new group in place
 idata.to_netcdf("results.nc")  # Update with posterior predictive
 ```
+
+**Note**: Use `.update({...})` or direct assignment (`idata["posterior_predictive"] = ppd_ds`) to add groups.
 
 ## Prior Selection
 
@@ -316,6 +333,8 @@ See [references/priors.md](references/priors.md) for:
 - Weakly informative defaults by distribution type
 - Prior predictive checking workflow
 - Domain-specific recommendations
+
+For constrained priors, expert elicitation workflows, and PreliZ integration, see the [prior-elicitation skill](../prior-elicitation/SKILL.md).
 
 ## Common Patterns
 
@@ -424,13 +443,13 @@ with pm.Model(coords=coords) as gmm:
     y = pm.NormalMixture("y", w=w, mu=mu, sigma=sigma, observed=y_obs)
 ```
 
-**Important**: Mixture models often need `target_accept=0.9` or higher to avoid divergences from the multimodal geometry. Always provide `initval` on ordered means — without it, components can start overlapping and the sampler struggles to separate them.
+**Important**: Mixture models often need `nuts={"target_accept": 0.9}` or higher to avoid divergences from the multimodal geometry. Always provide `initval` on ordered means — without it, components can start overlapping and the sampler struggles to separate them.
 
 See [references/mixtures.md](references/mixtures.md) for label switching solutions, marginalized mixtures, and mixture diagnostics.
 
 ### Sparse Regression / Horseshoe
 
-Use the regularized (Finnish) horseshoe prior for high-dimensional regression with expected sparsity. Horseshoe priors create double-funnel geometry — use `target_accept=0.95` or higher.
+Use the regularized (Finnish) horseshoe prior for high-dimensional regression with expected sparsity. Horseshoe priors create double-funnel geometry — use `nuts={"target_accept": 0.95}` or higher.
 
 See [references/priors.md](references/priors.md) for full regularized horseshoe code, Laplace, R2D2, and spike-and-slab alternatives.
 
@@ -485,12 +504,12 @@ with pm.do(causal_model, {"x": 2}) as intervention_model:
 
 # pm.observe — condition (preserves causal structure)
 with pm.observe(causal_model, {"y": 1}) as conditioned_model:
-    idata = pm.sample(nuts_sampler="nutpie")  # P(x, z | y=1)
+    idata = pm.sample()  # P(x, z | y=1)
 
 # Combine: P(y | do(x=2), z=0)
 with pm.do(causal_model, {"x": 2}) as m1:
     with pm.observe(m1, {"z": 0}) as m2:
-        idata = pm.sample(nuts_sampler="nutpie")
+        idata = pm.sample()
 ```
 
 See [references/causal.md](references/causal.md) for detailed causal inference patterns.
@@ -501,6 +520,8 @@ Key extensions via `import pymc_extras as pmx`:
 - `pmx.marginalize(model, ["discrete_var"])` — marginalize discrete parameters for NUTS
 - `pmx.R2D2M2CP(...)` — R2D2 prior for regression (see [references/priors.md](references/priors.md))
 - `pmx.fit_laplace(model)` — Laplace approximation for fast inference
+
+For detailed coverage of splines, distributional regression, and R2D2M2CP, see the [pymc-extras skill](../pymc-extras/SKILL.md).
 
 ## Custom Distributions and Model Components
 

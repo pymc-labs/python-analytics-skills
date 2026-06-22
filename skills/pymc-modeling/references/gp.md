@@ -266,7 +266,7 @@ with model:
 # Plot prior function draws
 import matplotlib.pyplot as plt
 for i in range(20):
-    plt.plot(X, prior.prior["f"][0, i], alpha=0.3)
+    plt.plot(X, prior["prior"]["f"][0, i], alpha=0.3)
 plt.title("HSGP Prior Samples")
 ```
 

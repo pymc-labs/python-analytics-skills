@@ -4,7 +4,7 @@ This guide covers ArviZ like an expert Bayesian modeler uses it: not just what e
 
 ## Table of Contents
 - [The Expert Workflow](#the-expert-workflow)
-- [InferenceData Fundamentals](#inferencedata-fundamentals)
+- [DataTree Fundamentals](#datatree-fundamentals)
 - [Phase 1: Immediate Post-Sampling Checks](#phase-1-immediate-post-sampling-checks)
 - [Phase 2: Deep Convergence Assessment](#phase-2-deep-convergence-assessment)
 - [Phase 3: Model Criticism](#phase-3-model-criticism)
@@ -30,63 +30,69 @@ An expert doesn't randomly try plots—they follow a systematic workflow:
 **Phase 2 (Deep)**: Are chains healthy? Rank plots, energy, autocorrelation, MCSE.
 **Phase 3 (Criticism)**: Does the model fit? PPC, LOO-PIT, residual analysis.
 **Phase 4 (Interpretation)**: What did we learn? Posteriors, forest plots, pair plots.
-**Phase 5 (Comparison)**: Which model is best? LOO-CV, WAIC, stacking.
+**Phase 5 (Comparison)**: Which model is best? LOO-CV, stacking.
 
 **Critical rule**: Never interpret parameters (Phase 4) until Phases 1-3 pass.
 
 ---
 
-## InferenceData Fundamentals
+## DataTree Fundamentals
 
-ArviZ uses `InferenceData`—an xarray-based container. Master this to unlock ArviZ's power.
+`pm.sample()` returns an `xarray.DataTree`. The variable name `idata` is kept by convention. Access groups via bracket syntax; attribute access (`idata.posterior`) is not supported.
 
 ### Structure
 
 ```python
 import arviz as az
 
-# InferenceData groups:
-idata.posterior          # MCMC samples: (chain, draw, *dims)
-idata.posterior_predictive  # Predictions at observed points
-idata.prior              # Prior samples
-idata.prior_predictive   # Prior predictions
-idata.observed_data      # The actual data
-idata.sample_stats       # Sampler diagnostics (divergences, energy, etc.)
-idata.log_likelihood     # Pointwise log-likelihoods (for LOO/WAIC)
+# DataTree groups (access via dict syntax):
+dt = idata  # idata is a DataTree
+dt["posterior"]              # MCMC samples: (chain, draw, *dims)
+dt["posterior_predictive"]   # Predictions at observed points
+dt["prior"]                  # Prior samples
+dt["prior_predictive"]       # Prior predictions
+dt["observed_data"]          # The actual data
+dt["sample_stats"]           # Sampler diagnostics (divergences, energy, etc.)
+dt["log_likelihood"]         # Pointwise log-likelihoods (for LOO)
+
+# List available groups
+dt.children  # replaces .groups()
 ```
 
 ### Essential Operations
 
 ```python
 # Access a parameter (returns xarray.DataArray)
-beta = idata.posterior["beta"]
+beta = dt["posterior"]["beta"]
+# Equivalent — `.ds` is the Dataset attached to this node:
+beta = dt["posterior"].ds["beta"]
 
 # Convert to numpy
-beta_vals = idata.posterior["beta"].values  # shape: (chains, draws, *dims)
+beta_vals = dt["posterior"]["beta"].values  # shape: (chains, draws, *dims)
 
 # Flatten across chains
-beta_flat = idata.posterior["beta"].stack(sample=("chain", "draw")).values
+beta_flat = dt["posterior"]["beta"].stack(sample=("chain", "draw")).values
 
 # Select specific chains/draws
-idata.posterior["beta"].sel(chain=0, draw=slice(500, None))
+dt["posterior"]["beta"].sel(chain=0, draw=slice(500, None))
 
 # Compute statistics
-idata.posterior["beta"].mean(dim=["chain", "draw"])
-idata.posterior["beta"].quantile([0.025, 0.975], dim=["chain", "draw"])
+dt["posterior"]["beta"].mean(dim=["chain", "draw"])
+dt["posterior"]["beta"].quantile([0.025, 0.975], dim=["chain", "draw"])
 
 # Filter variables
-idata.posterior[["alpha", "beta"]]
+dt["posterior"][["alpha", "beta"]]
 ```
 
-### Combining InferenceData Objects
+### Combining DataTree Objects
 
 ```python
 # Add posterior predictive to existing idata
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
-# Or manually extend
-idata.extend(pm.sample_posterior_predictive(idata))
+# Apply a function across all groups
+idata.map_over_datasets(some_function)  # replaces .map()
 
 # Merge separate idata objects
 idata_combined = az.concat([idata1, idata2], dim="chain")
@@ -103,7 +109,7 @@ idata = az.from_netcdf("results.nc")
 
 # Save with compression (for large files)
 idata.to_netcdf("results.nc", engine="h5netcdf",
-                encoding={var: {"zlib": True} for var in idata.posterior.data_vars})
+                encoding={var: {"zlib": True} for var in idata["posterior"].data_vars})
 ```
 
 ---
@@ -119,8 +125,8 @@ def quick_diagnostics(idata, var_names=None):
     """Run immediately after sampling."""
 
     # 1. Divergences (must be 0 or near 0)
-    n_div = idata.sample_stats["diverging"].sum().item()
-    n_samples = idata.sample_stats["diverging"].size
+    n_div = idata["sample_stats"]["diverging"].sum().item()
+    n_samples = idata["sample_stats"]["diverging"].size
     div_pct = 100 * n_div / n_samples
     print(f"Divergences: {n_div} ({div_pct:.2f}%)")
 
@@ -152,7 +158,7 @@ summary = az.summary(idata)
 
 # Key columns to check:
 # - mean, sd: posterior mean and standard deviation
-# - hdi_3%, hdi_97%: 94% highest density interval
+# - eti89_lb, eti89_ub: 89% equal-tailed interval (ArviZ 1.1 default)
 # - mcse_mean, mcse_sd: Monte Carlo standard error
 # - ess_bulk: effective sample size for the bulk of the distribution
 # - ess_tail: effective sample size for the tails (crucial for credible intervals)
@@ -161,11 +167,9 @@ summary = az.summary(idata)
 # Exclude auxiliary parameters (e.g., non-centered offsets)
 summary = az.summary(idata, var_names=["~offset", "~raw"])
 
-# Include specific stats only
-summary = az.summary(idata, stat_funcs={"median": np.median}, extend=True)
-
-# Custom credible interval
-summary = az.summary(idata, hdi_prob=0.90)
+# Custom credible interval (ArviZ 1.1 uses ci_prob; ci_kind selects "eti" or "hdi")
+summary = az.summary(idata, ci_prob=0.95)
+summary = az.summary(idata, ci_prob=0.94, ci_kind="hdi")  # HDI if you prefer
 ```
 
 **Interpretation thresholds:**
@@ -177,18 +181,17 @@ summary = az.summary(idata, hdi_prob=0.90)
 | `ess_tail` | > 400 | > 100 | < 100 |
 | `mcse_mean` | < 5% of SD | < 10% of SD | > 10% of SD |
 
-### az.plot_trace: Visual Convergence Check
+### az.plot_trace_dist: Visual Convergence Check
 
 ```python
 # Basic trace plot
-az.plot_trace(idata, var_names=["beta", "sigma"])
+az.plot_trace_dist(idata, var_names=["beta", "sigma"])
 
 # Compact mode for many parameters
-az.plot_trace(idata, compact=True, combined=True)
+az.plot_trace_dist(idata, compact=True, combined=True)
 
 # Rank-normalized traces (more sensitive to problems)
-az.plot_trace(idata, kind="rank_bars")
-az.plot_trace(idata, kind="rank_vlines")
+az.plot_rank(idata, var_names=["beta"])
 ```
 
 **What to look for:**
@@ -201,11 +204,11 @@ az.plot_trace(idata, kind="rank_vlines")
 ### Checking Divergences
 
 ```python
-# Count divergences
-n_div = idata.sample_stats["diverging"].sum().item()
+# Count divergences (DataTree access pattern)
+n_div = idata["sample_stats"]["diverging"].sum().item()
 
 # Percentage
-div_pct = 100 * idata.sample_stats["diverging"].mean().item()
+div_pct = 100 * idata["sample_stats"]["diverging"].mean().item()
 
 # When did they occur? (during warmup vs sampling)
 # Divergences in sample_stats are from sampling phase only
@@ -244,7 +247,7 @@ az.plot_rank(idata, var_names=["beta", "sigma"])
 
 ```python
 # How ESS grows with more draws
-az.plot_ess(idata, var_names=["beta"], kind="evolution")
+az.plot_ess_evolution(idata, var_names=["beta"])
 
 # ESS across the distribution (quantile-specific)
 az.plot_ess(idata, var_names=["beta"], kind="quantile")
@@ -324,27 +327,27 @@ for var in rhat_values.data_vars:
 
 Convergence doesn't mean the model is good—only that MCMC worked. Now assess whether the model actually fits the data.
 
-### az.plot_ppc: Posterior Predictive Checks
+### az.plot_ppc_dist: Posterior Predictive Checks
 
 The most important model criticism tool. Does the model generate data that looks like the observed data?
 
 ```python
 # First, generate posterior predictive samples
 with model:
-    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+    idata.update(pm.sample_posterior_predictive(idata))
 
 # Density overlay (default)
-az.plot_ppc(idata, kind="kde")
+az.plot_ppc_dist(idata, kind="kde")
 
 # Cumulative distribution (better for systematic deviations)
-az.plot_ppc(idata, kind="cumulative")
+az.plot_ppc_dist(idata, kind="ecdf")
 
-# Scatter plot (for continuous outcomes)
-az.plot_ppc(idata, kind="scatter")
+# Dot plot (for continuous outcomes)
+az.plot_ppc_dist(idata, kind="dot")
 
 # Subset draws if needed for speed
 idata_subset = idata.sel(draw=slice(0, 100))
-az.plot_ppc(idata_subset, kind="cumulative")
+az.plot_ppc_dist(idata_subset, kind="ecdf")
 ```
 
 **What to look for (density/KDE):**
@@ -363,10 +366,10 @@ Check fit across subgroups:
 
 ```python
 # PPC by group (if using coords)
-az.plot_ppc(idata, kind="cumulative", flatten=[])
+az.plot_ppc_dist(idata, kind="ecdf", cols=["group"])
 
 # For specific observed variable
-az.plot_ppc(idata, var_names=["y_obs"], kind="kde")
+az.plot_ppc_dist(idata, var_names=["y_obs"], kind="kde")
 ```
 
 ### Custom Posterior Predictive Checks
@@ -377,7 +380,7 @@ Sometimes you need to check specific features:
 # Define test statistics
 def tail_fraction(x):
     """Fraction of values > 95th percentile of observed data"""
-    threshold = np.percentile(idata.observed_data["y"].values, 95)
+    threshold = np.percentile(idata["observed_data"]["y"].values, 95)
     return (x > threshold).mean()
 
 def zero_fraction(x):
@@ -385,12 +388,12 @@ def zero_fraction(x):
     return (x == 0).mean()
 
 # Compute for observed data
-obs_stat = tail_fraction(idata.observed_data["y"].values)
+obs_stat = tail_fraction(idata["observed_data"]["y"].values)
 
 # Compute for each posterior predictive draw
 pp_stats = []
-for i in range(idata.posterior_predictive.dims["draw"]):
-    pp_sample = idata.posterior_predictive["y"].isel(draw=i).values.flatten()
+for i in range(idata["posterior_predictive"].sizes["draw"]):
+    pp_sample = idata["posterior_predictive"]["y"].isel(draw=i).values.flatten()
     pp_stats.append(tail_fraction(pp_sample))
 
 # Compare
@@ -406,7 +409,7 @@ plt.legend()
 The LOO-PIT (Leave-One-Out Probability Integral Transform) checks calibration: are the posterior predictive quantiles uniformly distributed?
 
 ```python
-az.plot_loo_pit(idata, y="y")
+az.plot_loo_pit(idata, var_names=["y"])
 ```
 
 **Interpretation:**
@@ -417,14 +420,14 @@ az.plot_loo_pit(idata, y="y")
 
 **Expert insight**: LOO-PIT is more sensitive than PPC for detecting calibration issues because it evaluates each observation using a model fit without that observation.
 
-### az.plot_bpv: Bayesian p-values
+### Posterior Predictive PIT and Test Statistics
 
 ```python
-# Histogram of Bayesian p-values
-az.plot_bpv(idata, kind="p_value")
+# PIT Δ-ECDF check
+az.plot_ppc_pit(idata)
 
 # Using a test statistic
-az.plot_bpv(idata, kind="t_stat")
+az.plot_ppc_tstat(idata, t_stat="median")
 ```
 
 **Interpretation:**
@@ -439,8 +442,8 @@ For regression models, check residuals:
 import numpy as np
 
 # Compute posterior mean predictions
-y_pred = idata.posterior_predictive["y"].mean(dim=["chain", "draw"])
-y_obs = idata.observed_data["y"]
+y_pred = idata["posterior_predictive"]["y"].mean(dim=["chain", "draw"])
+y_obs = idata["observed_data"]["y"]
 
 # Residuals
 residuals = y_obs - y_pred
@@ -465,27 +468,22 @@ plt.ylabel("Residuals")
 
 Only after Phases 1-3 pass should you interpret parameter estimates.
 
-### az.plot_posterior: Marginal Summaries
+### az.plot_dist: Marginal Summaries
 
 ```python
 # Basic posterior summary
-az.plot_posterior(idata, var_names=["beta", "sigma"])
+az.plot_dist(idata, var_names=["beta", "sigma"])
 
-# With reference value (null hypothesis)
-az.plot_posterior(idata, var_names=["beta"], ref_val=0)
-
-# With ROPE (Region of Practical Equivalence)
-az.plot_posterior(idata, var_names=["beta"], rope=[-0.1, 0.1])
-
-# Custom HDI probability
-az.plot_posterior(idata, hdi_prob=0.90)
+# Custom credible interval (ArviZ 1.1: ci_prob / ci_kind)
+az.plot_dist(idata, ci_prob=0.95)
+az.plot_dist(idata, ci_prob=0.89, ci_kind="hdi")
 
 # Point estimate options
-az.plot_posterior(idata, point_estimate="mode")  # or "mean", "median"
+az.plot_dist(idata, point_estimate="mode")  # or "mean", "median"
 ```
 
-**ROPE interpretation:**
-- Report % of posterior inside ROPE
+**ROPE interpretation** (compute explicitly; `az.plot_dist` has no `rope=` kwarg):
+- `in_rope = ((idata["posterior"]["beta"] > -0.1) & (idata["posterior"]["beta"] < 0.1)).mean()`
 - If > 95% inside ROPE: Practically equivalent to null
 - If < 5% inside ROPE: Practically different from null
 
@@ -586,9 +584,9 @@ print(loo_result)
 ```
 
 **Key outputs:**
-- `elpd_loo`: Expected log pointwise predictive density (higher is better)
-- `se`: Standard error of elpd_loo
-- `p_loo`: Effective number of parameters (model complexity)
+- `elpd`: Expected log pointwise predictive density (higher is better)
+- `se`: Standard error of elpd
+- `p`: Effective number of parameters (model complexity)
 - `pareto_k`: Diagnostic for approximation quality
 
 **Pareto k interpretation:**
@@ -618,14 +616,18 @@ Points above the 0.7 line are influential observations where LOO approximation i
 2. K-fold CV instead
 3. Investigating why these points are influential
 
-### az.waic: Widely Applicable Information Criterion
+### LOO utility functions
 
-```python
-waic_result = az.waic(idata)
-print(waic_result)
-```
-
-WAIC is an alternative to LOO. LOO is generally preferred (more robust), but WAIC is faster for large datasets.
+`az.waic` is removed — use LOO exclusively. Additional helpers:
+- `az.loo_expectations()` — weighted posterior expectations (mean / variance / quantile) from `posterior_predictive` + `log_likelihood`
+- `az.loo_metrics()` — predictive metrics (RMSE, MAE, etc.) in one call
+- `az.loo_r2()` — LOO-based R-squared
+- `az.loo_score()` — LOO scoring rules
+- `az.loo_kfold()` — K-fold cross-validation
+- `az.loo_moment_match()` — moment matching for high Pareto k observations
+- `az.loo_subsample()` — subsampled LOO for large datasets
+- `az.reloo()` — refit and recompute LOO for problematic observations
+- `az.loo_pit()` — calibration diagnostic (paired with `az.plot_loo_pit`)
 
 ### az.compare: Model Comparison Table
 
@@ -634,24 +636,24 @@ comparison = az.compare({
     "linear": idata_linear,
     "quadratic": idata_quad,
     "spline": idata_spline,
-}, ic="loo")
+})
 
 print(comparison)
 ```
 
 **Key columns:**
 - `rank`: Model ranking (0 is best)
-- `elpd_loo`: Expected log pointwise predictive density
-- `p_loo`: Effective number of parameters
-- `d_loo`: Difference from best model
+- `elpd`: Expected log pointwise predictive density
+- `p`: Effective number of parameters
+- `elpd_diff`: Difference from best model
 - `weight`: Stacking weight (for model averaging)
 - `se`: Standard error
 - `dse`: Standard error of difference
 
 **Decision rules:**
-- If `d_loo < 2`: Models practically indistinguishable
-- If `d_loo < dse`: Difference not significant
-- If `d_loo > 4` and `d_loo > 2*dse`: Meaningful difference
+- If `abs(elpd_diff) < 4`: Models practically indistinguishable
+- If `abs(elpd_diff) < dse`: Difference not significant
+- If `abs(elpd_diff) > 4` and `abs(elpd_diff / dse) > 2`: Meaningful difference
 
 ### az.plot_compare: Visual Model Comparison
 
@@ -677,8 +679,8 @@ weights = comparison["weight"]
 
 # Use weights for prediction averaging
 y_pred_avg = (
-    weights["linear"] * idata_linear.posterior_predictive["y"].mean(dim=["chain", "draw"]) +
-    weights["quadratic"] * idata_quad.posterior_predictive["y"].mean(dim=["chain", "draw"])
+    weights["linear"] * idata_linear["posterior_predictive"]["y"].mean(dim=["chain", "draw"]) +
+    weights["quadratic"] * idata_quad["posterior_predictive"]["y"].mean(dim=["chain", "draw"])
 )
 ```
 
@@ -691,8 +693,8 @@ y_pred_avg = (
 ```python
 import xarray as xr
 
-# Compute custom statistics
-posterior = idata.posterior
+# Compute custom statistics on the posterior Dataset
+posterior = idata["posterior"].ds
 
 # Probability of effect > 0
 prob_positive = (posterior["beta"] > 0).mean(dim=["chain", "draw"])
@@ -704,7 +706,7 @@ prob_gt_threshold = (posterior["beta"] > threshold).mean(dim=["chain", "draw"])
 # Posterior contrasts
 if "group" in posterior["alpha"].dims:
     contrast = posterior["alpha"].sel(group="treatment") - posterior["alpha"].sel(group="control")
-    az.plot_posterior(contrast.to_dataset(name="treatment_effect"))
+    az.plot_dist(contrast.to_dataset(name="treatment_effect"))
 ```
 
 ### Custom Summary Functions
@@ -715,9 +717,9 @@ def prob_direction(x):
     return (np.sign(x) == np.sign(x.mean())).mean()
 
 def hdi_width(x):
-    """Width of 94% HDI"""
-    hdi = az.hdi(x, hdi_prob=0.94)
-    return hdi[1] - hdi[0]
+    """Width of 89% HDI"""
+    hdi = az.hdi(x, prob=0.89)
+    return hdi.sel(ci_bound="upper") - hdi.sel(ci_bound="lower")
 
 # Add to summary
 summary = az.summary(
@@ -727,7 +729,7 @@ summary = az.summary(
 )
 ```
 
-### Subsampling for Large InferenceData
+### Subsampling for Large DataTree Objects
 
 ```python
 # Thin samples (keep every nth)
@@ -735,7 +737,7 @@ idata_thin = idata.sel(draw=slice(None, None, 10))  # Keep every 10th
 
 # Random subset
 import numpy as np
-n_draws = idata.posterior.dims["draw"]
+n_draws = idata["posterior"].sizes["draw"]
 keep_idx = np.random.choice(n_draws, size=500, replace=False)
 idata_subset = idata.sel(draw=keep_idx)
 ```
@@ -745,7 +747,7 @@ idata_subset = idata.sel(draw=keep_idx)
 ```python
 # Get flattened samples for external tools
 samples_dict = {
-    var: idata.posterior[var].stack(sample=("chain", "draw")).values
+    var: idata["posterior"][var].stack(sample=("chain", "draw")).values
     for var in ["alpha", "beta", "sigma"]
 }
 
@@ -776,7 +778,7 @@ idata_combined = az.concat([idata1, idata2], dim="chain")
 **Diagnosis:**
 ```python
 az.plot_pair(idata, var_names=["theta"], marginals=True)
-az.plot_trace(idata, var_names=["theta"], compact=False)
+az.plot_trace_dist(idata, var_names=["theta"], compact=False)
 ```
 
 **Causes and fixes:**
@@ -823,7 +825,7 @@ az.plot_ess(idata, kind="quantile")  # Check ESS at different quantiles
 
 **Diagnosis:**
 ```python
-az.plot_posterior(idata, var_names=["sigma"])
+az.plot_dist(idata, var_names=["sigma"])
 ```
 
 **Interpretation:**
@@ -861,53 +863,41 @@ az.style.use("arviz-darkgrid")  # or "arviz-whitegrid", "arviz-white"
 
 # Custom style
 az.rcParams["plot.max_subplots"] = 40
-az.rcParams["stats.hdi_prob"] = 0.94
-az.rcParams["stats.ic_scale"] = "log"  # for LOO/WAIC
+az.rcParams["stats.ci_prob"] = 0.89  # ArviZ 1.1 default: 0.89 ETI
 ```
 
 ### Figure Sizing and Layout
 
 ```python
-# Control figure size
-fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-az.plot_posterior(idata, var_names=["beta"], ax=axes.flatten())
-plt.tight_layout()
-
-# Or let ArviZ handle it
-axes = az.plot_posterior(idata, var_names=["beta"], figsize=(12, 4))
+# Let PlotCollection handle layout and sizing
+az.plot_dist(
+    idata,
+    var_names=["beta"],
+    col_wrap=2,
+    figure_kwargs={"figsize": (10, 8)},
+)
 ```
 
-### Combining Multiple Plots
+### Related Diagnostic Plots
 
 ```python
-import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
+# Trace plus marginal distribution
+trace_pc = az.plot_trace_dist(idata, var_names=["beta"], compact=True, combined=True)
 
-fig = plt.figure(figsize=(14, 10))
-gs = GridSpec(2, 2, figure=fig)
+# Posterior marginal
+dist_pc = az.plot_dist(idata, var_names=["beta"])
 
-# Trace plot
-ax1 = fig.add_subplot(gs[0, :])
-az.plot_trace(idata, var_names=["beta"], compact=True, combined=True, ax=ax1)
-
-# Posterior
-ax2 = fig.add_subplot(gs[1, 0])
-az.plot_posterior(idata, var_names=["beta"], ax=ax2)
-
-# PPC
-ax3 = fig.add_subplot(gs[1, 1])
-az.plot_ppc(idata, kind="cumulative", ax=ax3)
-
-plt.tight_layout()
+# Posterior predictive distribution
+ppc_pc = az.plot_ppc_dist(idata, kind="ecdf")
 ```
 
 ### Saving Figures
 
 ```python
 # Save with high resolution
-fig = az.plot_posterior(idata, var_names=["beta"])
-plt.savefig("posterior.png", dpi=300, bbox_inches="tight")
-plt.savefig("posterior.pdf", bbox_inches="tight")  # Vector format
+pc = az.plot_dist(idata, var_names=["beta"])
+pc.savefig("posterior.png", dpi=300, bbox_inches="tight")
+pc.savefig("posterior.pdf", bbox_inches="tight")  # Vector format
 ```
 
 ### LaTeX Labels
@@ -917,7 +907,7 @@ import matplotlib.pyplot as plt
 plt.rcParams["text.usetex"] = True
 
 # Use LaTeX in labels
-az.plot_posterior(
+az.plot_dist(
     idata,
     var_names=["beta"],
     labeller=az.labels.MapLabeller(var_name_map={"beta": r"$\beta$"})
@@ -930,16 +920,16 @@ az.plot_posterior(
 
 | Question | Plot | Function |
 |----------|------|----------|
-| Did MCMC converge? | Trace, Rank | `plot_trace`, `plot_rank` |
+| Did MCMC converge? | Trace, Rank | `plot_trace_dist`, `plot_rank` |
 | Are there divergences? | Pair with divergences | `plot_pair(..., divergences=True)` |
-| Is ESS adequate? | ESS evolution | `plot_ess(kind="evolution")` |
+| Is ESS adequate? | ESS evolution | `plot_ess_evolution` |
 | Is mixing efficient? | Autocorrelation | `plot_autocorr` |
 | Is HMC healthy? | Energy | `plot_energy` |
-| Does model fit? | PPC | `plot_ppc` |
+| Does model fit? | PPC | `plot_ppc_dist` |
 | Is model calibrated? | LOO-PIT | `plot_loo_pit` |
-| What are the estimates? | Posterior | `plot_posterior` |
+| What are the estimates? | Posterior | `plot_dist` |
 | Compare group effects? | Forest | `plot_forest` |
 | Parameters correlated? | Pair | `plot_pair` |
 | Which model is best? | Compare | `plot_compare` |
 | Which points influential? | Pareto k | `plot_khat` |
-| Prior sensible? | Prior predictive | `plot_ppc(..., group="prior")` |
+| Prior sensible? | Prior predictive | `plot_ppc_dist(..., group="prior_predictive")` |
