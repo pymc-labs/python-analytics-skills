@@ -27,10 +27,10 @@ matches_any() {
 
 pymc_keywords=(
   "bayesian" "pymc" "pytensor" "aesara" "mcmc" "posterior" "inference" "arviz"
-  "prior" "sampling" "divergence" "hierarchical model"
-  "gaussian process" "bart" "nuts" "hmc" "nutpie" "probabilistic"
+  "\bpriors?\b" "sampling" "divergence" "hierarchical model"
+  "gaussian process" "\bbart\b" "\bnuts\b" "\bhmc\b" "nutpie" "probabilistic"
   "credible interval" "posterior predictive" "prior predictive"
-  "trace" "r_hat" "rhat" "ess_bulk" "convergence" "hsgp"
+  "\btraces?\b" "r_hat" "\brhat\b" "ess_bulk" "convergence" "hsgp"
   "zero.inflated" "mixture model" "multilevel" "brms"
   "logistic regression.*bayes" "poisson regression.*bayes"
   "censored" "truncated" "ordinal" "causal inference"
@@ -47,14 +47,14 @@ pymc_testing_keywords=(
 )
 
 prior_elicitation_keywords=(
-  "find_constrained_prior" "preliz" "elicit" "prior selection"
+  "find_constrained_prior" "preliz" "\belicit" "prior selection"
   "prior predictive" "constrained prior" "prior elicitation"
   "expert knowledge.*prior" "prior.*expert" "informative prior"
   "weakly informative" "domain knowledge.*prior"
 )
 
 model_evaluation_keywords=(
-  "model comparison" "loo" "elpd" "stacking" "bayes factor"
+  "model comparison" "\bloo\b" "elpd" "stacking" "bayes factor"
   "cross-validation" "waic" "model averaging" "model weight"
   "az\\.compare" "az\\.loo" "pointwise.*loo" "loo.pit"
   "k.pareto" "pareto.k" "information criterion"
@@ -62,7 +62,7 @@ model_evaluation_keywords=(
 )
 
 pymc_extras_keywords=(
-  "pymc_extras" "pmx" "splines" "distributional regression"
+  "pymc_extras" "\bpmx\b" "\bsplines?\b" "distributional regression"
   "r2d2" "marginalize" "fit_laplace" "laplace approximation"
   "horseshoe" "finnish horseshoe" "regularized horseshoe"
   "pymc.extras" "pymc-extras"
